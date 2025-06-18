@@ -2,9 +2,9 @@ name: MLflow CI/CD with Docker Hub
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
 
 env:
@@ -18,320 +18,321 @@ env:
 jobs:
   mlflow-training:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        
-    - name: Set up Conda
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: ${{ env.PYTHON_VERSION }}
-        
-    - name: Cache Conda Environment
-      uses: actions/cache@v3
-      with:
-        path: ~/conda_pkgs_dir
-        key: ${{ runner.os }}-conda-${{ hashFiles('MLProject/conda.yaml') }}
-        restore-keys: |
-          ${{ runner.os }}-conda-
-          
-    - name: Create MLProject file
-      run: |
-        cd MLProject
-        cat > MLproject << 'EOF'
-        name: Worker-Productivity-MLflow
-        python_env: conda.yaml
-        entry_points:
-          main:
-            command: "python modelling.py"
-          train:
-            parameters:
-              data_path: { type: str, default: "processed_data" }
-              experiment_name: { type: str, default: "Worker_Productivity_Classification_Sklearn" }
-            command: "python modelling.py --data_path {data_path} --experiment_name {experiment_name}"
-          build_docker:
-            command: "mlflow models build-docker -m models:/WorkerProductivityMLP_Basic/latest -n worker-productivity-mlp --enable-mlserver"
-        EOF
-        
-    - name: Install MLflow
-      run: |
-        pip install mlflow dagshub
-        
-    - name: Verify MLflow Installation
-      run: |
-        mlflow --version
-        python -c "import mlflow; print('MLflow installed successfully')"
-        
-    - name: Configure DagsHub Authentication  
-      run: |
-        export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
-        export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}" 
-        export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
-        echo "DagsHub authentication configured"
-        
-    - name: Run MLflow Project
-      run: |
-        cd MLProject
-        mlflow run . --env-manager=conda
-      env:
-        MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-        MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-        MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_USER_TOKEN }}
-        
-    - name: List Generated Artifacts
-      run: |
-        echo "Generated artifacts:"
-        ls -la MLProject/
-        echo "Model artifacts in MLflow:"
-        cd MLProject && python -c "
-        import mlflow
-        import os
-        os.environ['MLFLOW_TRACKING_URI'] = '${{ secrets.MLFLOW_TRACKING_URI }}'
-        os.environ['MLFLOW_TRACKING_USERNAME'] = '${{ secrets.DAGSHUB_USERNAME }}'
-        os.environ['MLFLOW_TRACKING_PASSWORD'] = '${{ secrets.DAGSHUB_USER_TOKEN }}'
-        mlflow.set_tracking_uri('${{ secrets.MLFLOW_TRACKING_URI }}')
-        try:
-            latest_run = mlflow.search_runs(order_by=['start_time DESC'], max_results=1)
-            if not latest_run.empty:
-                run_id = latest_run.iloc[0]['run_id']
-                print(f'Latest run ID: {run_id}')
-                artifacts = mlflow.list_artifacts(run_id)
-                print('Artifacts:')
-                for artifact in artifacts:
-                    print(f'  - {artifact.path}')
-            else:
-                print('No runs found')
-        except Exception as e:
-            print(f'Error listing artifacts: {e}')
-        "
-        
-    - name: Setup Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-        
-    - name: Build Docker Image with MLflow
-      run: |
-        cd MLProject
-        sleep 30
-        
-        export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
-        export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}"
-        export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
-        
-        python -c "
-        import mlflow
-        import os
-        import time
-        import subprocess
-        
-        os.environ['MLFLOW_TRACKING_URI'] = '${{ secrets.MLFLOW_TRACKING_URI }}'
-        os.environ['MLFLOW_TRACKING_USERNAME'] = '${{ secrets.DAGSHUB_USERNAME }}'
-        os.environ['MLFLOW_TRACKING_PASSWORD'] = '${{ secrets.DAGSHUB_USER_TOKEN }}'
-        mlflow.set_tracking_uri('${{ secrets.MLFLOW_TRACKING_URI }}')
-        
-        try:
-            client = mlflow.MlflowClient()
-            model_name = 'WorkerProductivityMLP_Basic'
-            
-            max_retries = 10
-            for i in range(max_retries):
-                try:
-                    latest_versions = client.get_latest_versions(model_name, stages=['None'])
-                    if latest_versions:
-                        latest_version = latest_versions[0]
-                        model_uri = f'models:/{model_name}/{latest_version.version}'
-                        print(f'Found model: {model_uri}')
-                        
-                        image_name = '${{ secrets.DOCKER_REPO }}'
-                        cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name} --enable-mlserver'
-                        print(f'Running: {cmd}')
-                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                        
-                        if result.returncode == 0:
-                            print('Docker build successful')
-                            print(result.stdout)
-                        else:
-                            print('Docker build failed')
-                            print(result.stderr)
-                            print('Trying alternative docker build...')
-                            alt_cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name}'
-                            alt_result = subprocess.run(alt_cmd, shell=True, capture_output=True, text=True)
-                            print(alt_result.stdout)
-                            if alt_result.stderr:
-                                print(alt_result.stderr)
-                        break
-                    else:
-                        print(f'Attempt {i+1}: Model not found yet, waiting...')
-                        time.sleep(10)
-                except Exception as e:
-                    print(f'Attempt {i+1}: Error - {e}')
-                    time.sleep(10)
-            else:
-                print('Max retries reached, building with latest run...')
-                runs = mlflow.search_runs(order_by=['start_time DESC'], max_results=1)
-                if not runs.empty:
-                    run_id = runs.iloc[0]['run_id']
-                    model_uri = f'runs:/{run_id}/model'
-                    print(f'Using run model: {model_uri}')
-                    
-                    image_name = '${{ secrets.DOCKER_REPO }}'
-                    cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name}'
-                    print(f'Running: {cmd}')
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                    print(result.stdout)
-                    if result.stderr:
-                        print(result.stderr)
-                        
-        except Exception as e:
-            print(f'Error during Docker build: {e}')
-            print('Creating fallback Dockerfile...')
-            dockerfile_content = '''FROM python:3.12.7-slim
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-WORKDIR /app
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ env.PYTHON_VERSION }}
 
-COPY . .
+      - name: Cache Conda Environment
+        uses: actions/cache@v3
+        with:
+          path: ~/conda_pkgs_dir
+          key: ${{ runner.os }}-conda-${{ hashFiles('MLProject/conda.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-conda-
 
-EXPOSE 8080
-
-CMD [\"python\", \"modelling.py\"]'''
-            with open('Dockerfile', 'w') as f:
-                f.write(dockerfile_content)
-                
-            requirements_content = '''mlflow==2.19.0
-scikit-learn==1.5.2
-pandas==2.3.0
-numpy==1.26.4
-dagshub==0.5.10'''
-            with open('requirements.txt', 'w') as f:
-                f.write(requirements_content)
-            
-            print('Fallback files created')
-        "
-        
-    - name: Push Docker Image to Hub
-      run: |
-        if docker images | grep -q "${{ secrets.DOCKER_REPO }}"; then
-          echo "MLflow-built image found, pushing to Docker Hub..."
-          docker push ${{ secrets.DOCKER_REPO }}
-        else
-          echo "MLflow build failed, creating and pushing fallback image..."
+      - name: Create MLProject file
+        run: |
           cd MLProject
-          
-          cat > Dockerfile << 'EOF'
-        FROM python:3.12.7-slim
-        
-        WORKDIR /app
-        
-        RUN apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
-        
-        COPY conda.yaml .
-        
-        RUN pip install conda-pack
-        COPY . .
-        
-        RUN pip install mlflow==2.19.0 scikit-learn==1.5.2 pandas==2.3.0 numpy==1.26.4 dagshub==0.5.10 matplotlib seaborn PyYAML
-        
-        EXPOSE 8080
-        
-        CMD ["python", "modelling.py"]
-        EOF
-          
-          docker build -t ${{ secrets.DOCKER_REPO }} .
-          docker push ${{ secrets.DOCKER_REPO }}
-        fi
-        
-    - name: Upload Artifacts to Repository
-      uses: actions/upload-artifact@v4
-      with:
-        name: mlflow-artifacts
-        path: |
-          MLProject/*.txt
-          MLProject/*.json
-          MLProject/*.pkl
-          MLProject/*.yaml
-          MLProject/*.png
-        retention-days: 30
-        
-    - name: Create Release with Artifacts
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: model-${{ github.run_number }}
-        name: Model Release ${{ github.run_number }}
-        body: >
-          Automated Model Training Release
-          
-          
-          Training Results:
-          
-          - MLflow Project executed successfully
-          
-          - Docker image built and pushed to Docker Hub
-          
-          - All artifacts saved and available for download
-          
-          
-          Docker Image:
-          
-          docker pull ${{ secrets.DOCKER_REPO }}
-          
-          
-          Artifacts included:
-          
-          - Model files (*.pkl)
-          
-          - Training reports (*.txt)
-          
-          - Configuration files (*.json, *.yaml)
-          
-          - Visualizations (*.png)
-          
-          
-          MLflow Tracking: ${{ secrets.MLFLOW_TRACKING_URI }}
-        files: |
-          MLProject/*.txt
-          MLProject/*.json
-          MLProject/*.pkl
-          MLProject/*.yaml
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Cleanup
-      if: always()
-      run: |
-        echo "Cleaning up temporary files..."
-        docker system prune -f
-        echo "Cleanup completed"
-        
-    - name: Summary
-      if: always()
-      run: |
-        echo "CI/CD Pipeline Summary"
-        echo "=================================="
-        echo "MLflow Project executed"
-        echo "Model trained and logged"
-        echo "Docker image built and pushed"
-        echo "Artifacts uploaded to GitHub"
-        echo "Release created (if on main branch)"
-        echo ""
-        echo "Links:"
-        echo "- Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}"
-        echo "- MLflow: ${{ secrets.MLFLOW_TRACKING_URI }}"
-        echo "- Repository: ${{ github.server_url }}/${{ github.repository }}"
+          cat > MLproject << 'EOF'
+          name: Worker-Productivity-MLflow
+          python_env: conda.yaml
+          entry_points:
+            main:
+              command: "python modelling.py"
+            train:
+              parameters:
+                data_path: { type: str, default: "processed_data" }
+                experiment_name: { type: str, default: "Worker_Productivity_Classification_Sklearn" }
+              command: "python modelling.py --data_path {data_path} --experiment_name {experiment_name}"
+            build_docker:
+              command: "mlflow models build-docker -m models:/WorkerProductivityMLP_Basic/latest -n worker-productivity-mlp --enable-mlserver"
+          EOF
+
+      - name: Install MLflow
+        run: |
+          pip install mlflow dagshub
+
+      - name: Verify MLflow Installation
+        run: |
+          mlflow --version
+          python -c "import mlflow; print('MLflow installed successfully')"
+
+      - name: Configure DagsHub Authentication
+        run: |
+          export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
+          export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}" 
+          export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
+          echo "DagsHub authentication configured"
+
+      - name: Run MLflow Project
+        run: |
+          cd MLProject
+          mlflow run . --env-manager=conda
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_USER_TOKEN }}
+
+      - name: List Generated Artifacts
+        run: |
+          echo "Generated artifacts:"
+          ls -la MLProject/
+          echo "Model artifacts in MLflow:"
+          cd MLProject && python -c "
+          import mlflow
+          import os
+          os.environ['MLFLOW_TRACKING_URI'] = '${{ secrets.MLFLOW_TRACKING_URI }}'
+          os.environ['MLFLOW_TRACKING_USERNAME'] = '${{ secrets.DAGSHUB_USERNAME }}'
+          os.environ['MLFLOW_TRACKING_PASSWORD'] = '${{ secrets.DAGSHUB_USER_TOKEN }}'
+          mlflow.set_tracking_uri('${{ secrets.MLFLOW_TRACKING_URI }}')
+          try:
+              latest_run = mlflow.search_runs(order_by=['start_time DESC'], max_results=1)
+              if not latest_run.empty:
+                  run_id = latest_run.iloc[0]['run_id']
+                  print(f'Latest run ID: {run_id}')
+                  artifacts = mlflow.list_artifacts(run_id)
+                  print('Artifacts:')
+                  for artifact in artifacts:
+                      print(f'  - {artifact.path}')
+              else:
+                  print('No runs found')
+          except Exception as e:
+              print(f'Error listing artifacts: {e}')
+          "
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker Image with MLflow
+        run: |
+          cd MLProject
+          sleep 30
+
+          export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
+          export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}"
+          export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
+
+          python -c "
+          import mlflow
+          import os
+          import time
+          import subprocess
+
+          os.environ['MLFLOW_TRACKING_URI'] = '${{ secrets.MLFLOW_TRACKING_URI }}'
+          os.environ['MLFLOW_TRACKING_USERNAME'] = '${{ secrets.DAGSHUB_USERNAME }}'
+          os.environ['MLFLOW_TRACKING_PASSWORD'] = '${{ secrets.DAGSHUB_USER_TOKEN }}'
+          mlflow.set_tracking_uri('${{ secrets.MLFLOW_TRACKING_URI }}')
+
+          try:
+              client = mlflow.MlflowClient()
+              model_name = 'WorkerProductivityMLP_Basic'
+              
+              max_retries = 10
+              for i in range(max_retries):
+                  try:
+                      latest_versions = client.get_latest_versions(model_name, stages=['None'])
+                      if latest_versions:
+                          latest_version = latest_versions[0]
+                          model_uri = f'models:/{model_name}/{latest_version.version}'
+                          print(f'Found model: {model_uri}')
+                          
+                          image_name = '${{ secrets.DOCKER_REPO }}'
+                          cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name} --enable-mlserver'
+                          print(f'Running: {cmd}')
+                          result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                          
+                          if result.returncode == 0:
+                              print('Docker build successful')
+                              print(result.stdout)
+                          else:
+                              print('Docker build failed')
+                              print(result.stderr)
+                              print('Trying alternative docker build...')
+                              alt_cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name}'
+                              alt_result = subprocess.run(alt_cmd, shell=True, capture_output=True, text=True)
+                              print(alt_result.stdout)
+                              if alt_result.stderr:
+                                  print(alt_result.stderr)
+                          break
+                      else:
+                          print(f'Attempt {i+1}: Model not found yet, waiting...')
+                          time.sleep(10)
+                  except Exception as e:
+                      print(f'Attempt {i+1}: Error - {e}')
+                      time.sleep(10)
+              else:
+                  print('Max retries reached, building with latest run...')
+                  runs = mlflow.search_runs(order_by=['start_time DESC'], max_results=1)
+                  if not runs.empty:
+                      run_id = runs.iloc[0]['run_id']
+                      model_uri = f'runs:/{run_id}/model'
+                      print(f'Using run model: {model_uri}')
+                      
+                      image_name = '${{ secrets.DOCKER_REPO }}'
+                      cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name}'
+                      print(f'Running: {cmd}')
+                      result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                      print(result.stdout)
+                      if result.stderr:
+                          print(result.stderr)
+                          
+          except Exception as e:
+              print(f'Error during Docker build: {e}')
+              print('Creating fallback Dockerfile...')
+              dockerfile_content = '''FROM python:3.12.7-slim
+              
+              WORKDIR /app
+              
+              COPY requirements.txt .
+              RUN pip install -r requirements.txt
+              
+              COPY . .
+              
+              EXPOSE 8080
+              
+              CMD ["python", "modelling.py"]'''
+              with open('Dockerfile', 'w') as f:
+                  f.write(dockerfile_content)
+                  
+              requirements_content = '''mlflow==2.19.0
+              scikit-learn==1.5.2
+              pandas==2.3.0
+              numpy==1.26.4
+              dagshub==0.5.10'''
+              
+              with open('requirements.txt', 'w') as f:
+                  f.write(requirements_content)
+              
+              print('Fallback files created')
+          "
+
+      - name: Push Docker Image to Hub
+        run: |
+          if docker images | grep -q "${{ secrets.DOCKER_REPO }}"; then
+            echo "MLflow-built image found, pushing to Docker Hub..."
+            docker push ${{ secrets.DOCKER_REPO }}
+          else
+            echo "MLflow build failed, creating and pushing fallback image..."
+            cd MLProject
+            
+            cat > Dockerfile << 'EOF'
+          FROM python:3.12.7-slim
+
+          WORKDIR /app
+
+          RUN apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
+
+          COPY conda.yaml .
+
+          RUN pip install conda-pack
+          COPY . .
+
+          RUN pip install mlflow==2.19.0 scikit-learn==1.5.2 pandas==2.3.0 numpy==1.26.4 dagshub==0.5.10 matplotlib seaborn PyYAML
+
+          EXPOSE 8080
+
+          CMD ["python", "modelling.py"]
+          EOF
+            
+            docker build -t ${{ secrets.DOCKER_REPO }} .
+            docker push ${{ secrets.DOCKER_REPO }}
+          fi
+
+      - name: Upload Artifacts to Repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-artifacts
+          path: |
+            MLProject/*.txt
+            MLProject/*.json
+            MLProject/*.pkl
+            MLProject/*.yaml
+            MLProject/*.png
+          retention-days: 30
+
+      - name: Create Release with Artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: model-${{ github.run_number }}
+          name: Model Release ${{ github.run_number }}
+          body: >
+            Automated Model Training Release
+
+
+            Training Results:
+
+            - MLflow Project executed successfully
+
+            - Docker image built and pushed to Docker Hub
+
+            - All artifacts saved and available for download
+
+
+            Docker Image:
+
+            docker pull ${{ secrets.DOCKER_REPO }}
+
+
+            Artifacts included:
+
+            - Model files (*.pkl)
+
+            - Training reports (*.txt)
+
+            - Configuration files (*.json, *.yaml)
+
+            - Visualizations (*.png)
+
+
+            MLflow Tracking: ${{ secrets.MLFLOW_TRACKING_URI }}
+          files: |
+            MLProject/*.txt
+            MLProject/*.json
+            MLProject/*.pkl
+            MLProject/*.yaml
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up temporary files..."
+          docker system prune -f
+          echo "Cleanup completed"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "CI/CD Pipeline Summary"
+          echo "=================================="
+          echo "MLflow Project executed"
+          echo "Model trained and logged"
+          echo "Docker image built and pushed"
+          echo "Artifacts uploaded to GitHub"
+          echo "Release created (if on main branch)"
+          echo ""
+          echo "Links:"
+          echo "- Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}"
+          echo "- MLflow: ${{ secrets.MLFLOW_TRACKING_URI }}"
+          echo "- Repository: ${{ github.server_url }}/${{ github.repository }}"
