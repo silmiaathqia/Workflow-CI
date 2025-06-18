@@ -41,10 +41,8 @@ jobs:
         with:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
-          # Fix: Explicitly specify channels with defaults first, then conda-forge
           channels: defaults,conda-forge
           channel-priority: flexible
-          # Fix: Remove defaults channel implicitly
           conda-remove-defaults: false
 
       - name: Configure Conda Channels
@@ -157,8 +155,11 @@ jobs:
           cd MLProject
           echo "Installing dependencies with conda environment..."
           
+          # Remove existing environment if it exists
+          conda env remove -n mlflow-env --yes || echo "Environment doesn't exist, continuing..."
+          
           # Create environment with explicit channel configuration
-          CONDA_CHANNEL_PRIORITY=flexible conda env create -f conda.yaml --force
+          CONDA_CHANNEL_PRIORITY=flexible conda env create -f conda.yaml
           conda activate mlflow-env
           
           echo "Verifying installation..."
