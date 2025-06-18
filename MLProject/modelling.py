@@ -28,9 +28,21 @@ def setup_mlflow_dagshub():
         tracking_uri = os.getenv('MLFLOW_TRACKING_URI', "https://dagshub.com/silmiaathqia/Worker-Productivity-MLflow.mlflow")
         mlflow.set_tracking_uri(tracking_uri)
         
-        # Set experiment name
+        # Set experiment name - gunakan try/except untuk handling experiment
         experiment_name = "Worker_Productivity_Classification_Sklearn"
-        mlflow.set_experiment(experiment_name)
+        try:
+            experiment = mlflow.get_experiment_by_name(experiment_name)
+            if experiment is None:
+                experiment_id = mlflow.create_experiment(experiment_name)
+                print(f"Created new experiment: {experiment_name} (ID: {experiment_id})")
+            else:
+                mlflow.set_experiment(experiment_name)
+                print(f"Using existing experiment: {experiment_name}")
+        except Exception as exp_error:
+            print(f"Warning: Experiment setup error: {exp_error}")
+            # Fallback ke default experiment
+            experiment_name = "Default"
+            mlflow.set_experiment(experiment_name)
         
         print("MLflow dan DagsHub berhasil dikonfigurasi!")
         print(f"Tracking URI: {mlflow.get_tracking_uri()}")
@@ -43,7 +55,11 @@ def setup_mlflow_dagshub():
         print("Akan menggunakan local tracking...")
         mlflow.set_tracking_uri("file:./mlruns")
         experiment_name = "Worker_Productivity_Local"
-        mlflow.set_experiment(experiment_name)
+        try:
+            mlflow.set_experiment(experiment_name)
+        except:
+            experiment_name = "Default"
+            mlflow.set_experiment(experiment_name)
         return experiment_name
 
 def load_processed_data(data_path="processed_data"):
@@ -299,8 +315,12 @@ def train_basic_model(data_path="processed_data", experiment_name=None):
     
     # Setup MLflow dan DagsHub
     if experiment_name:
-        mlflow.set_experiment(experiment_name)
-        exp_name = experiment_name
+        try:
+            mlflow.set_experiment(experiment_name)
+            exp_name = experiment_name
+        except Exception as e:
+            print(f"Warning: Could not set experiment {experiment_name}: {e}")
+            exp_name = setup_mlflow_dagshub()
     else:
         exp_name = setup_mlflow_dagshub()
     
@@ -346,224 +366,271 @@ def train_basic_model(data_path="processed_data", experiment_name=None):
     with open('dagshub_info.json', 'w') as f:
         json.dump(dagshub_info, f, indent=2)
 
-    # Run experiment dengan manual logging
-    with mlflow.start_run(run_name="MLProject_Basic_MLP"):
-        print("\n" + "="*60)
-        print("STARTING MLflow PROJECT TRAINING")
-        print("="*60)
+    # Run experiment dengan manual logging dan error handling
+    try:
+        with mlflow.start_run(run_name="MLProject_Basic_MLP"):
+            print("\n" + "="*60)
+            print("STARTING MLflow RUN")
+            print("="*60)
+            
+            # DISABLE autolog untuk manual control
+            mlflow.sklearn.autolog(disable=True)
+            
+            # Log parameters manually
+            model_params = {
+                'hidden_layer_sizes': str((128, 64, 32)),
+                'activation': 'relu',
+                'solver': 'adam',
+                'alpha': 0.001,
+                'learning_rate': 'constant',
+                'learning_rate_init': 0.001,
+                'max_iter': 500,
+                'shuffle': True,
+                'random_state': 42,
+                'tol': 1e-4,
+                'validation_fraction': 0.1,
+                'beta_1': 0.9,
+                'beta_2': 0.999,
+                'epsilon': 1e-8,
+                'n_iter_no_change': 10,
+                'early_stopping': True,
+                'batch_size': 'auto',
+                'verbose': False,
+                'model_type': 'basic_mlp',
+                'framework': 'sklearn',
+                'experiment_group': 'mlproject',
+                'data_path': str(data_path),
+                'ci_cd_mode': True
+            }
+            
+            # Log all parameters
+            for param_name, param_value in model_params.items():
+                try:
+                    mlflow.log_param(param_name, param_value)
+                except Exception as param_error:
+                    print(f"Warning: Could not log parameter {param_name}: {param_error}")
+            
+            # Create and train model
+            model = create_mlp_model()
+            
+            print("\nModel Configuration:")
+            print(f"Hidden layers: {model.hidden_layer_sizes}")
+            print(f"Solver: {model.solver}")
+            print(f"Alpha (L2 reg): {model.alpha}")
+            
+            # Train model
+            print("\nStarting training...")
+            model.fit(X_train_scaled, y_train_full)
+            
+            print(f"Training completed!")
+            print(f"Iterations: {model.n_iter_}")
+            print(f"Final loss: {model.loss_:.6f}")
+            
+            # Make predictions
+            y_pred = model.predict(X_test_scaled)
+            y_pred_proba = model.predict_proba(X_test_scaled)
+            
+            # Calculate metrics
+            accuracy = accuracy_score(y_test, y_pred)
+            precision = precision_score(y_test, y_pred, average='weighted')
+            recall = recall_score(y_test, y_pred, average='weighted')
+            f1 = f1_score(y_test, y_pred, average='weighted')
+            
+            # Calculate per-class metrics
+            precision_per_class = precision_score(y_test, y_pred, average=None)
+            recall_per_class = recall_score(y_test, y_pred, average=None)
+            f1_per_class = f1_score(y_test, y_pred, average=None)
+            
+            # Calculate confusion matrix
+            cm = confusion_matrix(y_test, y_pred)
+            class_names = ['High', 'Low', 'Medium']
+            
+            # Log all metrics manually
+            metrics = {
+                'test_accuracy': accuracy,
+                'test_precision_weighted': precision,
+                'test_recall_weighted': recall,
+                'test_f1_score_weighted': f1,
+                'training_loss': model.loss_,
+                'n_iterations': model.n_iter_,
+                'convergence_achieved': model.n_iter_ < model.max_iter,
+                # Per-class metrics
+                'test_precision_high': precision_per_class[0],
+                'test_precision_low': precision_per_class[1],
+                'test_precision_medium': precision_per_class[2],
+                'test_recall_high': recall_per_class[0],
+                'test_recall_low': recall_per_class[1],
+                'test_recall_medium': recall_per_class[2],
+                'test_f1_high': f1_per_class[0],
+                'test_f1_low': f1_per_class[1],
+                'test_f1_medium': f1_per_class[2],
+                # Dataset info
+                'train_samples': len(X_train_full),
+                'test_samples': len(X_test),
+                'n_features': X_train_full.shape[1],
+                'n_classes': len(class_names)
+            }
+            
+            # Log metrics with error handling
+            for metric_name, metric_value in metrics.items():
+                try:
+                    mlflow.log_metric(metric_name, metric_value)
+                except Exception as metric_error:
+                    print(f"Warning: Could not log metric {metric_name}: {metric_error}")
+            
+            print(f"\nTest Results:")
+            print(f"Accuracy: {accuracy:.4f}")
+            print(f"Precision: {precision:.4f}")
+            print(f"Recall: {recall:.4f}")
+            print(f"F1-Score: {f1:.4f}")
+            
+            # Classification report
+            class_report = classification_report(y_test, y_pred, target_names=class_names)
+            print("\nClassification Report:")
+            print(class_report)
+            
+            # Save classification report
+            with open('classification_report_basic.txt', 'w') as f:
+                f.write("MLflow Project - Basic MLP Model\n")
+                f.write("=" * 35 + "\n")
+                f.write(class_report)
+            
+            # Create visualizations
+            cm_file = plot_confusion_matrix(y_test, y_pred, class_names)
+            metrics_file = plot_metrics_comparison({
+                'Accuracy': accuracy,
+                'Precision': precision,
+                'Recall': recall,
+                'F1-Score': f1
+            })
+            
+            # Create environment file
+            env_file = create_environment_file()
+            
+            # Create deployment info
+            deployment_file = create_deployment_info()
+            
+            # Create model summary
+            with open('model_summary_basic.txt', 'w') as f:
+                f.write("MLflow Project - Basic MLP Model Summary\n")
+                f.write("=" * 40 + "\n")
+                f.write(f"Architecture: {model.hidden_layer_sizes}\n")
+                f.write(f"Solver: {model.solver}\n")
+                f.write(f"Training iterations: {model.n_iter_}\n")
+                f.write(f"Final loss: {model.loss_:.6f}\n")
+                f.write(f"Convergence: {'Yes' if model.n_iter_ < model.max_iter else 'No'}\n")
+                f.write(f"CI/CD Mode: True\n")
+                f.write(f"MLflow Project: True\n")
+                f.write("\nPerformance:\n")
+                f.write(f"Accuracy: {accuracy:.4f}\n")
+                f.write(f"Precision: {precision:.4f}\n")
+                f.write(f"Recall: {recall:.4f}\n")
+                f.write(f"F1-Score: {f1:.4f}\n")
+            
+            # Log model dengan signature dan error handling
+            try:
+                signature = mlflow.models.infer_signature(X_train_scaled, y_pred)
+                mlflow.sklearn.log_model(
+                    model, 
+                    "model",
+                    signature=signature,
+                    registered_model_name="WorkerProductivityMLP_Basic"
+                )
+                print("✅ Model logged with signature")
+            except Exception as model_error:
+                print(f"Warning: Model logging with signature failed: {model_error}")
+                try:
+                    mlflow.sklearn.log_model(
+                        model, 
+                        "model",
+                        registered_model_name="WorkerProductivityMLP_Basic"
+                    )
+                    print("✅ Model logged without signature")
+                except Exception as model_error2:
+                    print(f"Warning: Model logging failed: {model_error2}")
+                    # Log model without registration
+                    mlflow.sklearn.log_model(model, "model")
+                    print("✅ Model logged without registration")
+            
+            # Save and log scaler
+            with open('scaler_basic.pkl', 'wb') as f:
+                pickle.dump(scaler, f)
+            
+            # Log all artifacts
+            artifacts_to_log = [
+                'scaler_basic.pkl',
+                'dagshub_info.json',
+                'classification_report_basic.txt',
+                'model_summary_basic.txt',
+                deployment_file
+            ]
+            
+            # Add visualization files if they exist
+            if cm_file and Path(cm_file).exists():
+                artifacts_to_log.append(cm_file)
+            if metrics_file and Path(metrics_file).exists():
+                artifacts_to_log.append(metrics_file)
+            if env_file and Path(env_file).exists():
+                artifacts_to_log.append(env_file)
+            
+            for artifact in artifacts_to_log:
+                if os.path.exists(artifact):
+                    try:
+                        mlflow.log_artifact(artifact)
+                        print(f"✅ Logged: {artifact}")
+                    except Exception as artifact_error:
+                        print(f"Warning: Could not log artifact {artifact}: {artifact_error}")
+            
+            # Set tags
+            try:
+                mlflow.set_tags({
+                    "model_type": "basic_mlp",
+                    "framework": "sklearn",
+                    "version": "1.0",
+                    "dataset": "worker_productivity",
+                    "author": "mlflow_project",
+                    "experiment_group": "ci_cd",
+                    "logging_type": "manual",
+                    "mlflow_project": "true",
+                    "docker_ready": "true"
+                })
+            except Exception as tag_error:
+                print(f"Warning: Could not set tags: {tag_error}")
+            
+            print("\n" + "="*60)
+            print("✅ MLflow PROJECT TRAINING COMPLETED!")
+            print("="*60)
+            print(f"Accuracy: {accuracy:.4f}")
+            print(f"F1-Score: {f1:.4f}")
+            print(f"Model: WorkerProductivityMLP_Basic")
+            print(f"Artifacts logged: {len(artifacts_to_log)}")
+            
+            return model, scaler, metrics
+            
+    except Exception as run_error:
+        print(f"❌ MLflow run failed: {run_error}")
+        print("Training will continue without MLflow logging...")
         
-        # DISABLE autolog untuk manual control
-        mlflow.sklearn.autolog(disable=True)
-        
-        # Log parameters manually
-        model_params = {
-            'hidden_layer_sizes': str((128, 64, 32)),
-            'activation': 'relu',
-            'solver': 'adam',
-            'alpha': 0.001,
-            'learning_rate': 'constant',
-            'learning_rate_init': 0.001,
-            'max_iter': 500,
-            'shuffle': True,
-            'random_state': 42,
-            'tol': 1e-4,
-            'validation_fraction': 0.1,
-            'beta_1': 0.9,
-            'beta_2': 0.999,
-            'epsilon': 1e-8,
-            'n_iter_no_change': 10,
-            'early_stopping': True,
-            'batch_size': 'auto',
-            'verbose': False,
-            'model_type': 'basic_mlp',
-            'framework': 'sklearn',
-            'experiment_group': 'mlproject',
-            'data_path': str(data_path),
-            'ci_cd_mode': True
-        }
-        
-        # Log all parameters
-        mlflow.log_params(model_params)
-        
-        # Create and train model
+        # Continue training without MLflow
         model = create_mlp_model()
-        
-        print("\nModel Configuration:")
-        print(f"Hidden layers: {model.hidden_layer_sizes}")
-        print(f"Solver: {model.solver}")
-        print(f"Alpha (L2 reg): {model.alpha}")
-        
-        # Train model
-        print("\nStarting training...")
         model.fit(X_train_scaled, y_train_full)
-        
-        print(f"Training completed!")
-        print(f"Iterations: {model.n_iter_}")
-        print(f"Final loss: {model.loss_:.6f}")
-        
-        # Make predictions
         y_pred = model.predict(X_test_scaled)
-        y_pred_proba = model.predict_proba(X_test_scaled)
         
-        # Calculate metrics
         accuracy = accuracy_score(y_test, y_pred)
         precision = precision_score(y_test, y_pred, average='weighted')
         recall = recall_score(y_test, y_pred, average='weighted')
         f1 = f1_score(y_test, y_pred, average='weighted')
         
-        # Calculate per-class metrics
-        precision_per_class = precision_score(y_test, y_pred, average=None)
-        recall_per_class = recall_score(y_test, y_pred, average=None)
-        f1_per_class = f1_score(y_test, y_pred, average=None)
-        
-        # Calculate confusion matrix
-        cm = confusion_matrix(y_test, y_pred)
-        class_names = ['High', 'Low', 'Medium']
-        
-        # Log all metrics manually
         metrics = {
             'test_accuracy': accuracy,
             'test_precision_weighted': precision,
             'test_recall_weighted': recall,
-            'test_f1_score_weighted': f1,
-            'training_loss': model.loss_,
-            'n_iterations': model.n_iter_,
-            'convergence_achieved': model.n_iter_ < model.max_iter,
-            # Per-class metrics
-            'test_precision_high': precision_per_class[0],
-            'test_precision_low': precision_per_class[1],
-            'test_precision_medium': precision_per_class[2],
-            'test_recall_high': recall_per_class[0],
-            'test_recall_low': recall_per_class[1],
-            'test_recall_medium': recall_per_class[2],
-            'test_f1_high': f1_per_class[0],
-            'test_f1_low': f1_per_class[1],
-            'test_f1_medium': f1_per_class[2],
-            # Dataset info
-            'train_samples': len(X_train_full),
-            'test_samples': len(X_test),
-            'n_features': X_train_full.shape[1],
-            'n_classes': len(class_names)
+            'test_f1_score_weighted': f1
         }
         
-        # Log metrics
-        for metric_name, metric_value in metrics.items():
-            mlflow.log_metric(metric_name, metric_value)
-        
-        print(f"\nTest Results:")
-        print(f"Accuracy: {accuracy:.4f}")
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall: {recall:.4f}")
-        print(f"F1-Score: {f1:.4f}")
-        
-        # Classification report
-        class_report = classification_report(y_test, y_pred, target_names=class_names)
-        print("\nClassification Report:")
-        print(class_report)
-        
-        # Save classification report
-        with open('classification_report_basic.txt', 'w') as f:
-            f.write("MLflow Project - Basic MLP Model\n")
-            f.write("=" * 35 + "\n")
-            f.write(class_report)
-        
-        # Create visualizations
-        cm_file = plot_confusion_matrix(y_test, y_pred, class_names)
-        metrics_file = plot_metrics_comparison({
-            'Accuracy': accuracy,
-            'Precision': precision,
-            'Recall': recall,
-            'F1-Score': f1
-        })
-        
-        # Create environment file
-        env_file = create_environment_file()
-        
-        # Create deployment info
-        deployment_file = create_deployment_info()
-        
-        # Create model summary
-        with open('model_summary_basic.txt', 'w') as f:
-            f.write("MLflow Project - Basic MLP Model Summary\n")
-            f.write("=" * 40 + "\n")
-            f.write(f"Architecture: {model.hidden_layer_sizes}\n")
-            f.write(f"Solver: {model.solver}\n")
-            f.write(f"Training iterations: {model.n_iter_}\n")
-            f.write(f"Final loss: {model.loss_:.6f}\n")
-            f.write(f"Convergence: {'Yes' if model.n_iter_ < model.max_iter else 'No'}\n")
-            f.write(f"CI/CD Mode: True\n")
-            f.write(f"MLflow Project: True\n")
-            f.write("\nPerformance:\n")
-            f.write(f"Accuracy: {accuracy:.4f}\n")
-            f.write(f"Precision: {precision:.4f}\n")
-            f.write(f"Recall: {recall:.4f}\n")
-            f.write(f"F1-Score: {f1:.4f}\n")
-        
-        # Log model dengan signature
-        try:
-            signature = mlflow.models.infer_signature(X_train_scaled, y_pred)
-            mlflow.sklearn.log_model(
-                model, 
-                "model",
-                signature=signature,
-                registered_model_name="WorkerProductivityMLP_Basic"
-            )
-            print("✅ Model logged with signature")
-        except Exception as e:
-            print(f"Warning: Signature creation failed: {e}")
-            mlflow.sklearn.log_model(
-                model, 
-                "model",
-                registered_model_name="WorkerProductivityMLP_Basic"
-            )
-            print("✅ Model logged without signature")
-        
-        # Save and log scaler
-        with open('scaler_basic.pkl', 'wb') as f:
-            pickle.dump(scaler, f)
-        
-        # Log all artifacts
-        artifacts_to_log = [
-            'scaler_basic.pkl',
-            'dagshub_info.json',
-            'classification_report_basic.txt',
-            'model_summary_basic.txt',
-            deployment_file
-        ]
-        
-        # Add visualization files if they exist
-        if cm_file and Path(cm_file).exists():
-            artifacts_to_log.append(cm_file)
-        if metrics_file and Path(metrics_file).exists():
-            artifacts_to_log.append(metrics_file)
-        if env_file and Path(env_file).exists():
-            artifacts_to_log.append(env_file)
-        
-        for artifact in artifacts_to_log:
-            if os.path.exists(artifact):
-                mlflow.log_artifact(artifact)
-                print(f"✅ Logged: {artifact}")
-        
-        # Set tags
-        mlflow.set_tags({
-            "model_type": "basic_mlp",
-            "framework": "sklearn",
-            "version": "1.0",
-            "dataset": "worker_productivity",
-            "author": "mlflow_project",
-            "experiment_group": "ci_cd",
-            "logging_type": "manual",
-            "mlflow_project": "true",
-            "docker_ready": "true"
-        })
-        
-        print("\n" + "="*60)
-        print("✅ MLflow PROJECT TRAINING COMPLETED!")
-        print("="*60)
+        print(f"Training completed without MLflow:")
         print(f"Accuracy: {accuracy:.4f}")
         print(f"F1-Score: {f1:.4f}")
-        print(f"Model: WorkerProductivityMLP_Basic")
-        print(f"Artifacts logged: {len(artifacts_to_log)}")
         
         return model, scaler, metrics
 
