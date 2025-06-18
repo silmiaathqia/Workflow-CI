@@ -14,6 +14,7 @@ on:
 env:
   MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
   DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_USER_TOKEN }}
+  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
   DOCKER_REPO: ${{ secrets.DOCKER_REPO }}
@@ -33,8 +34,10 @@ jobs:
           find . -type f -name "*.py" -o -name "*.yml" -o -name "*.yaml" -o -name "*.csv" | head -20
           echo "Current directory contents:"
           ls -la
-          echo "MLProject directory (if exists):"
-          ls -la MLProject/ || echo "MLProject directory not found"
+          echo "Looking for modelling.py:"
+          find . -name "modelling.py" -type f
+          echo "Looking for processed_data:"
+          find . -name "processed_data" -type d
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -57,21 +60,39 @@ jobs:
 
       - name: Create MLProject Structure
         run: |
-          # Create MLProject directory if it doesn't exist
+          echo "Creating MLProject structure..."
           mkdir -p MLProject
           
-          # Copy files to MLProject if they exist in root
+          # Copy modelling.py to MLProject if it exists in root
           if [ -f "modelling.py" ]; then
+            echo "Copying modelling.py from root"
             cp modelling.py MLProject/
+          else
+            echo "modelling.py not found in root"
+            # Check if it exists in MLProject already
+            if [ ! -f "MLProject/modelling.py" ]; then
+              echo "ERROR: modelling.py not found anywhere"
+              exit 1
+            fi
           fi
           
+          # Copy processed_data to MLProject if it exists
           if [ -d "processed_data" ]; then
+            echo "Copying processed_data from root"
             cp -r processed_data MLProject/
+          else
+            echo "processed_data not found in root, checking MLProject"
+            if [ ! -d "MLProject/processed_data" ]; then
+              echo "WARNING: processed_data directory not found"
+              echo "Creating placeholder structure"
+              mkdir -p MLProject/processed_data
+            fi
           fi
           
           # Create conda.yaml if it doesn't exist
           if [ ! -f "MLProject/conda.yaml" ]; then
             cd MLProject
+            echo "Creating conda.yaml"
             cat > conda.yaml << 'EOF'
           channels:
             - conda-forge
@@ -95,9 +116,10 @@ jobs:
             cd ..
           fi
 
-      - name: Create or Update MLProject file
+      - name: Create MLproject file
         run: |
           cd MLProject
+          echo "Creating MLproject file"
           cat > MLproject << 'EOF'
           name: Worker-Productivity-MLflow
           python_env: conda.yaml
@@ -117,19 +139,31 @@ jobs:
         run: |
           echo "MLProject directory contents:"
           ls -la MLProject/
-          echo "MLProject file content:"
+          echo ""
+          echo "MLproject file content:"
           cat MLProject/MLproject
+          echo ""
           echo "conda.yaml content:"
           cat MLProject/conda.yaml
+          echo ""
+          echo "Checking for modelling.py:"
+          if [ -f "MLProject/modelling.py" ]; then
+            echo "✓ modelling.py found"
+            echo "File size: $(wc -l < MLProject/modelling.py) lines"
+          else
+            echo "✗ modelling.py missing"
+            exit 1
+          fi
 
-      - name: Install MLflow
+      - name: Install MLflow and Dependencies
         run: |
-          pip install mlflow dagshub
+          pip install mlflow dagshub PyYAML
 
       - name: Verify MLflow Installation
         run: |
           mlflow --version
           python -c "import mlflow; print('MLflow installed successfully')"
+          python -c "import dagshub; print('DagsHub installed successfully')"
 
       - name: Configure DagsHub Authentication
         run: |
@@ -142,69 +176,125 @@ jobs:
         run: |
           cd MLProject
           if [ -d "processed_data" ]; then
-            echo "Data files found:"
+            echo "Data directory found:"
             ls -la processed_data/
+            echo ""
             echo "Checking required files:"
-            for file in data_train.csv data_validation.csv data_test.csv; do
+            required_files=("data_train.csv" "data_validation.csv" "data_test.csv")
+            all_files_exist=true
+            
+            for file in "${required_files[@]}"; do
               if [ -f "processed_data/$file" ]; then
                 echo "✓ $file exists"
-                echo "First few lines of $file:"
-                head -3 "processed_data/$file"
+                echo "  Size: $(wc -l < processed_data/$file) lines"
+                echo "  First few lines:"
+                head -3 "processed_data/$file" | sed 's/^/    /'
               else
                 echo "✗ $file missing"
+                all_files_exist=false
               fi
             done
+            
+            if [ "$all_files_exist" = false ]; then
+              echo "ERROR: Some required data files are missing"
+              exit 1
+            fi
           else
-            echo "⚠️  processed_data directory not found"
-            echo "Creating sample data structure for testing..."
-            mkdir -p processed_data
-            echo "This is a placeholder - replace with actual data" > processed_data/README.txt
+            echo "ERROR: processed_data directory not found"
+            exit 1
           fi
+
+      - name: Test Python Script
+        run: |
+          cd MLProject
+          echo "Testing Python script imports..."
+          python -c "
+          import sys
+          sys.path.append('.')
+          try:
+              # Test imports from modelling.py
+              import pandas as pd
+              import numpy as np
+              import sklearn
+              import mlflow
+              import dagshub
+              print('✓ All required packages imported successfully')
+              
+              # Test if modelling.py can be imported
+              import importlib.util
+              spec = importlib.util.spec_from_file_location('modelling', 'modelling.py')
+              modelling = importlib.util.module_from_spec(spec)
+              print('✓ modelling.py can be loaded')
+          except Exception as e:
+              print(f'✗ Import error: {e}')
+              sys.exit(1)
+          "
 
       - name: Run MLflow Project
         run: |
           cd MLProject
-          # Check if data exists before running
-          if [ -f "processed_data/data_train.csv" ] && [ -f "processed_data/data_validation.csv" ] && [ -f "processed_data/data_test.csv" ]; then
-            echo "Running MLflow project with data..."
-            mlflow run . --env-manager=conda
-          else
-            echo "Data files not found. Skipping MLflow run."
-            echo "Please ensure the following files exist in MLProject/processed_data/:"
-            echo "- data_train.csv"
-            echo "- data_validation.csv"
-            echo "- data_test.csv"
-            exit 1
-          fi
+          echo "Running MLflow project..."
+          echo "Current directory: $(pwd)"
+          echo "Files in directory:"
+          ls -la
+          
+          # Set environment variables for MLflow
+          export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
+          export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}"
+          export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
+          export DAGSHUB_USER_TOKEN="${{ secrets.DAGSHUB_USER_TOKEN }}"
+          
+          # Run the MLflow project
+          mlflow run . \
+            --env-manager=conda \
+            --experiment-name="Worker_Productivity_Classification_Sklearn" \
+            -P data_path="processed_data" \
+            -P experiment_name="Worker_Productivity_Classification_Sklearn"
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_USER_TOKEN }}
+          DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_USER_TOKEN }}
 
       - name: List Generated Artifacts
         if: success()
         run: |
-          echo "Generated artifacts:"
+          echo "Generated artifacts in MLProject:"
           ls -la MLProject/
-          echo "Model artifacts in MLflow:"
+          echo ""
+          echo "Generated files:"
+          find MLProject/ -name "*.pkl" -o -name "*.txt" -o -name "*.json" -o -name "*.png" | head -10
+          echo ""
+          echo "Checking MLflow artifacts..."
           cd MLProject && python -c "
           import mlflow
           import os
+          
+          # Set environment variables
           os.environ['MLFLOW_TRACKING_URI'] = '${{ secrets.MLFLOW_TRACKING_URI }}'
           os.environ['MLFLOW_TRACKING_USERNAME'] = '${{ secrets.DAGSHUB_USERNAME }}'
           os.environ['MLFLOW_TRACKING_PASSWORD'] = '${{ secrets.DAGSHUB_USER_TOKEN }}'
+          
           mlflow.set_tracking_uri('${{ secrets.MLFLOW_TRACKING_URI }}')
+          
           try:
-              latest_run = mlflow.search_runs(order_by=['start_time DESC'], max_results=1)
-              if not latest_run.empty:
-                  run_id = latest_run.iloc[0]['run_id']
-                  print(f'Latest run ID: {run_id}')
-                  artifacts = mlflow.list_artifacts(run_id)
-                  print('Artifacts:')
-                  for artifact in artifacts:
-                      print(f'  - {artifact.path}')
+              # Get latest run
+              experiment = mlflow.get_experiment_by_name('Worker_Productivity_Classification_Sklearn')
+              if experiment:
+                  runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], 
+                                          order_by=['start_time DESC'], 
+                                          max_results=1)
+                  if not runs.empty:
+                      run_id = runs.iloc[0]['run_id']
+                      print(f'Latest run ID: {run_id}')
+                      artifacts = mlflow.list_artifacts(run_id)
+                      print('Artifacts:')
+                      for artifact in artifacts:
+                          print(f'  - {artifact.path}')
+                  else:
+                      print('No runs found in experiment')
               else:
-                  print('No runs found')
+                  print('Experiment not found')
           except Exception as e:
               print(f'Error listing artifacts: {e}')
           "
@@ -224,6 +314,7 @@ jobs:
         if: success()
         run: |
           cd MLProject
+          echo "Waiting for model registration to complete..."
           sleep 30
 
           export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
@@ -235,7 +326,9 @@ jobs:
           import os
           import time
           import subprocess
+          import sys
 
+          # Set environment variables
           os.environ['MLFLOW_TRACKING_URI'] = '${{ secrets.MLFLOW_TRACKING_URI }}'
           os.environ['MLFLOW_TRACKING_USERNAME'] = '${{ secrets.DAGSHUB_USERNAME }}'
           os.environ['MLFLOW_TRACKING_PASSWORD'] = '${{ secrets.DAGSHUB_USER_TOKEN }}'
@@ -244,117 +337,115 @@ jobs:
           try:
               client = mlflow.MlflowClient()
               model_name = 'WorkerProductivityMLP_Basic'
+              image_name = '${{ secrets.DOCKER_REPO }}'
               
-              max_retries = 10
+              # Try to get registered model
+              max_retries = 15
+              model_uri = None
+              
               for i in range(max_retries):
                   try:
                       latest_versions = client.get_latest_versions(model_name, stages=['None'])
                       if latest_versions:
                           latest_version = latest_versions[0]
                           model_uri = f'models:/{model_name}/{latest_version.version}'
-                          print(f'Found model: {model_uri}')
-                          
-                          image_name = '${{ secrets.DOCKER_REPO }}'
-                          cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name} --enable-mlserver'
-                          print(f'Running: {cmd}')
-                          result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                          
-                          if result.returncode == 0:
-                              print('Docker build successful')
-                              print(result.stdout)
-                          else:
-                              print('Docker build failed')
-                              print(result.stderr)
-                              print('Trying alternative docker build...')
-                              alt_cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name}'
-                              alt_result = subprocess.run(alt_cmd, shell=True, capture_output=True, text=True)
-                              print(alt_result.stdout)
-                              if alt_result.stderr:
-                                  print(alt_result.stderr)
+                          print(f'Found registered model: {model_uri}')
                           break
                       else:
-                          print(f'Attempt {i+1}: Model not found yet, waiting...')
-                          time.sleep(10)
+                          print(f'Attempt {i+1}: No registered model versions found')
                   except Exception as e:
-                      print(f'Attempt {i+1}: Error - {e}')
-                      time.sleep(10)
-              else:
-                  print('Max retries reached, building with latest run...')
-                  runs = mlflow.search_runs(order_by=['start_time DESC'], max_results=1)
-                  if not runs.empty:
-                      run_id = runs.iloc[0]['run_id']
-                      model_uri = f'runs:/{run_id}/model'
-                      print(f'Using run model: {model_uri}')
-                      
-                      image_name = '${{ secrets.DOCKER_REPO }}'
-                      cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name}'
-                      print(f'Running: {cmd}')
-                      result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                      print(f'Attempt {i+1}: Error getting registered model - {e}')
+                  
+                  time.sleep(10)
+              
+              # If no registered model, try to use latest run
+              if not model_uri:
+                  print('No registered model found, trying latest run...')
+                  experiment = mlflow.get_experiment_by_name('Worker_Productivity_Classification_Sklearn')
+                  if experiment:
+                      runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], 
+                                              order_by=['start_time DESC'], 
+                                              max_results=1)
+                      if not runs.empty:
+                          run_id = runs.iloc[0]['run_id']
+                          model_uri = f'runs:/{run_id}/model'
+                          print(f'Using run model: {model_uri}')
+              
+              if model_uri:
+                  # Try building with MLflow
+                  print(f'Building Docker image with model: {model_uri}')
+                  cmd = f'mlflow models build-docker -m \"{model_uri}\" -n {image_name}'
+                  print(f'Command: {cmd}')
+                  
+                  result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                  
+                  if result.returncode == 0:
+                      print('✓ Docker build successful with MLflow')
                       print(result.stdout)
-                      if result.stderr:
-                          print(result.stderr)
-                          
+                  else:
+                      print('✗ MLflow Docker build failed')
+                      print('STDOUT:', result.stdout)
+                      print('STDERR:', result.stderr)
+                      raise Exception('MLflow Docker build failed')
+              else:
+                  raise Exception('No model found for Docker build')
+                  
           except Exception as e:
-              print(f'Error during Docker build: {e}')
-              print('Creating fallback Dockerfile...')
+              print(f'MLflow Docker build error: {e}')
+              print('Creating fallback Docker setup...')
+              
+              # Create fallback Dockerfile
               dockerfile_content = '''FROM python:3.12.7-slim
+
+          WORKDIR /app
+
+          # Install system dependencies
+          RUN apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
+
+          # Copy requirements
+          COPY conda.yaml .
+
+          # Install Python dependencies
+          RUN pip install mlflow==2.19.0 scikit-learn==1.5.2 pandas==2.3.0 numpy==1.26.4 dagshub==0.5.10 matplotlib seaborn PyYAML
+
+          # Copy application files
+          COPY . .
+
+          # Expose port
+          EXPOSE 8080
+
+          # Run application
+          CMD [\"python\", \"modelling.py\"]'''
               
-              WORKDIR /app
-              
-              COPY requirements.txt .
-              RUN pip install -r requirements.txt
-              
-              COPY . .
-              
-              EXPOSE 8080
-              
-              CMD [\"python\", \"modelling.py\"]'''
               with open('Dockerfile', 'w') as f:
                   f.write(dockerfile_content)
-                  
-              requirements_content = '''mlflow==2.19.0
-              scikit-learn==1.5.2
-              pandas==2.3.0
-              numpy==1.26.4
-              dagshub==0.5.10'''
               
-              with open('requirements.txt', 'w') as f:
-                  f.write(requirements_content)
-              
-              print('Fallback files created')
+              print('✓ Fallback Dockerfile created')
           "
 
       - name: Push Docker Image to Hub
         if: success()
         run: |
+          cd MLProject
+          
+          # Check if MLflow built image exists
           if docker images | grep -q "${{ secrets.DOCKER_REPO }}"; then
-            echo "MLflow-built image found, pushing to Docker Hub..."
+            echo "✓ MLflow-built image found, pushing to Docker Hub..."
             docker push ${{ secrets.DOCKER_REPO }}
+            echo "✓ Docker image pushed successfully"
           else
-            echo "MLflow build failed, creating and pushing fallback image..."
-            cd MLProject
+            echo "MLflow build not found, building fallback image..."
             
-            cat > Dockerfile << 'EOF'
-          FROM python:3.12.7-slim
-
-          WORKDIR /app
-
-          RUN apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
-
-          COPY conda.yaml .
-
-          RUN pip install conda-pack
-          COPY . .
-
-          RUN pip install mlflow==2.19.0 scikit-learn==1.5.2 pandas==2.3.0 numpy==1.26.4 dagshub==0.5.10 matplotlib seaborn PyYAML
-
-          EXPOSE 8080
-
-          CMD ["python", "modelling.py"]
-          EOF
-            
-            docker build -t ${{ secrets.DOCKER_REPO }} .
-            docker push ${{ secrets.DOCKER_REPO }}
+            # Build fallback image if Dockerfile exists
+            if [ -f "Dockerfile" ]; then
+              echo "Building fallback Docker image..."
+              docker build -t ${{ secrets.DOCKER_REPO }} .
+              docker push ${{ secrets.DOCKER_REPO }}
+              echo "✓ Fallback Docker image built and pushed"
+            else
+              echo "✗ No Docker image available to push"
+              exit 1
+            fi
           fi
 
       - name: Upload Artifacts to Repository
@@ -385,13 +476,16 @@ jobs:
               - All artifacts saved and available for download
 
             Docker Image:
+              ```
               docker pull ${{ secrets.DOCKER_REPO }}
+              ```
               
             Artifacts included:
               - Model files (*.pkl)
               - Training reports (*.txt)
               - Configuration files (*.json, *.yaml)
               - Visualizations (*.png)
+              
             MLflow Tracking: ${{ secrets.MLFLOW_TRACKING_URI }}
           files: |
             MLProject/*.txt
@@ -407,21 +501,29 @@ jobs:
         if: always()
         run: |
           echo "Cleaning up temporary files..."
-          docker system prune -f
-          echo "Cleanup completed"
+          docker system prune -f || true
+          echo "✓ Cleanup completed"
 
       - name: Summary
         if: always()
         run: |
-          echo "CI/CD Pipeline Summary"
-          echo "=================================="
+          echo ""
+          echo "========================================"
+          echo "           CI/CD Pipeline Summary       "
+          echo "========================================"
           echo "MLflow Project status: ${{ job.status }}"
-          echo "Model trained and logged: ${{ steps.run-mlflow-project.outcome == 'success' }}"
-          echo "Docker image built and pushed: ${{ steps.push-docker-image-to-hub.outcome == 'success' }}"
-          echo "Artifacts uploaded to GitHub: ${{ steps.upload-artifacts-to-repository.outcome == 'success' }}"
-          echo "Release created: ${{ steps.create-release-with-artifacts.outcome == 'success' }}"
+          echo "Steps completed:"
+          echo "  - Repository checkout: ✓"
+          echo "  - MLProject setup: ✓"
+          echo "  - Data validation: ${{ steps.validate-data-files.outcome == 'success' && '✓' || '✗' }}"
+          echo "  - Model training: ${{ steps.run-mlflow-project.outcome == 'success' && '✓' || '✗' }}"
+          echo "  - Docker build: ${{ steps.build-docker-image-with-mlflow.outcome == 'success' && '✓' || '✗' }}"
+          echo "  - Docker push: ${{ steps.push-docker-image-to-hub.outcome == 'success' && '✓' || '✗' }}"
+          echo "  - Artifacts upload: ${{ steps.upload-artifacts-to-repository.outcome == 'success' && '✓' || '✗' }}"
+          echo "  - Release creation: ${{ steps.create-release-with-artifacts.outcome == 'success' && '✓' || '✗' }}"
           echo ""
           echo "Links:"
-          echo "- Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}"
-          echo "- MLflow: ${{ secrets.MLFLOW_TRACKING_URI }}"
-          echo "- Repository: ${{ github.server_url }}/${{ github.repository }}"
+          echo "  - Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}"
+          echo "  - MLflow: ${{ secrets.MLFLOW_TRACKING_URI }}"
+          echo "  - Repository: ${{ github.server_url }}/${{ github.repository }}"
+          echo "========================================"
