@@ -3,7 +3,6 @@
 [![MLflow CI/CD with Docker Hub](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow-docker.yml/badge.svg)](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow-docker.yml)
 [![Python](https://img.shields.io/badge/python-3.12.7-blue.svg)](https://www.python.org/downloads/)
 [![MLflow](https://img.shields.io/badge/MLflow-2.19.0-orange.svg)](https://mlflow.org/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## 🎯 Overview
@@ -12,7 +11,6 @@ Automated CI/CD pipeline for Worker Productivity Classification using **MLflow P
 
 ### Key Features
 - ✅ **Automated ML Pipeline** with MLflow Project
-- 🐳 **Docker containerization** for deployment
 - 📊 **DagsHub integration** for experiment tracking
 - 🔄 **GitHub Actions CI/CD**
 - 📈 **Automated model versioning**
@@ -91,9 +89,8 @@ docker run -p 8080:8080 your-dockerhub-username/worker-productivity-mlp
 2. **Environment Setup** - Create conda environment with dependencies
 3. **Model Training** - Train MLP model with MLflow tracking
 4. **Evaluation** - Generate metrics, confusion matrix, and reports
-5. **Docker Build** - Create containerized application
-6. **Deployment** - Push to Docker Hub
-7. **Release** - Create GitHub release with artifacts
+5. **Deployment** - Push to Docker Hub
+6. **Release** - Create GitHub release with artifacts
 
 ## 🎛️ Configuration
 
@@ -121,15 +118,6 @@ The pipeline automatically tracks:
 - **Confusion Matrix**: Visual classification results
 - **Training Loss**: Model convergence monitoring
 
-## 🐳 Docker Deployment
-
-The pipeline creates a production-ready Docker image with:
-- Python 3.12.7 slim base
-- All ML dependencies pre-installed
-- Non-root user for security
-- Port 8080 exposed
-- Automatic model serving capability
-
 ## 📋 Generated Artifacts
 
 Each pipeline run produces:
@@ -137,12 +125,10 @@ Each pipeline run produces:
 - `*.txt` - Classification reports and summaries
 - `*.json` - Configuration and deployment info
 - `*.png` - Visualization plots
-- `Dockerfile` - Container configuration
 
 ## 🔗 Integration Links
 
 - **MLflow Tracking**: [DagsHub Project](https://dagshub.com/silmiaathqia/Worker-Productivity-MLflow)
-- **Docker Hub**: [Container Repository](https://hub.docker.com/r/your-username/worker-productivity-mlp)
 - **CI/CD Pipeline**: [GitHub Actions](https://github.com/silmiaathqia/Workflow-CI/actions)
 
 ## 🛠️ Troubleshooting
@@ -150,8 +136,7 @@ Each pipeline run produces:
 ### Common Issues
 1. **Data Files Missing**: Ensure all CSV files are in `processed_data/`
 2. **MLflow Connection**: Check DagsHub credentials in secrets
-3. **Docker Build Failed**: Verify Docker Hub credentials
-4. **Model Training Error**: Check data format and feature consistency
+3. **Model Training Error**: Check data format and feature consistency
 
 ### Debug Commands
 ```bash
@@ -160,10 +145,6 @@ find . -name "*.csv" -o -name "*.py" -o -name "*.yml"
 
 # Validate MLflow connection
 python -c "import mlflow; print(mlflow.get_tracking_uri())"
-
-# Test Docker image locally
-docker build -t test-image .
-docker run --rm test-image python modelling.py --help
 ```
 
 ## 📝 Contributing
