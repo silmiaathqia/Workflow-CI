@@ -27,6 +27,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Debug - Check Repository Structure
+        run: |
+          echo "Repository structure:"
+          find . -type f -name "*.py" -o -name "*.yml" -o -name "*.yaml" -o -name "*.csv" | head -20
+          echo "Current directory contents:"
+          ls -la
+          echo "MLProject directory (if exists):"
+          ls -la MLProject/ || echo "MLProject directory not found"
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -42,11 +51,51 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/conda_pkgs_dir
-          key: ${{ runner.os }}-conda-${{ hashFiles('MLProject/conda.yaml') }}
+          key: ${{ runner.os }}-conda-${{ hashFiles('**/conda.yaml') }}
           restore-keys: |
             ${{ runner.os }}-conda-
 
-      - name: Create MLProject file
+      - name: Create MLProject Structure
+        run: |
+          # Create MLProject directory if it doesn't exist
+          mkdir -p MLProject
+          
+          # Copy files to MLProject if they exist in root
+          if [ -f "modelling.py" ]; then
+            cp modelling.py MLProject/
+          fi
+          
+          if [ -d "processed_data" ]; then
+            cp -r processed_data MLProject/
+          fi
+          
+          # Create conda.yaml if it doesn't exist
+          if [ ! -f "MLProject/conda.yaml" ]; then
+            cd MLProject
+            cat > conda.yaml << 'EOF'
+          channels:
+            - conda-forge
+          dependencies:
+            - python=3.12.7
+            - pip<=25.1
+            - pip:
+              - mlflow==2.19.0
+              - cloudpickle==3.1.1
+              - numpy==1.26.4
+              - pandas==2.3.0
+              - psutil==7.0.0
+              - scikit-learn==1.5.2
+              - scipy==1.15.3
+              - matplotlib==3.10.3
+              - seaborn==0.13.2
+              - dagshub==0.5.10
+              - PyYAML==6.0.2
+          name: mlflow-env
+          EOF
+            cd ..
+          fi
+
+      - name: Create or Update MLProject file
         run: |
           cd MLProject
           cat > MLproject << 'EOF'
@@ -64,6 +113,15 @@ jobs:
               command: "mlflow models build-docker -m models:/WorkerProductivityMLP_Basic/latest -n worker-productivity-mlp --enable-mlserver"
           EOF
 
+      - name: Verify MLProject Setup
+        run: |
+          echo "MLProject directory contents:"
+          ls -la MLProject/
+          echo "MLProject file content:"
+          cat MLProject/MLproject
+          echo "conda.yaml content:"
+          cat MLProject/conda.yaml
+
       - name: Install MLflow
         run: |
           pip install mlflow dagshub
@@ -80,16 +138,51 @@ jobs:
           export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
           echo "DagsHub authentication configured"
 
+      - name: Validate Data Files
+        run: |
+          cd MLProject
+          if [ -d "processed_data" ]; then
+            echo "Data files found:"
+            ls -la processed_data/
+            echo "Checking required files:"
+            for file in data_train.csv data_validation.csv data_test.csv; do
+              if [ -f "processed_data/$file" ]; then
+                echo "✓ $file exists"
+                echo "First few lines of $file:"
+                head -3 "processed_data/$file"
+              else
+                echo "✗ $file missing"
+              fi
+            done
+          else
+            echo "⚠️  processed_data directory not found"
+            echo "Creating sample data structure for testing..."
+            mkdir -p processed_data
+            echo "This is a placeholder - replace with actual data" > processed_data/README.txt
+          fi
+
       - name: Run MLflow Project
         run: |
           cd MLProject
-          mlflow run . --env-manager=conda
+          # Check if data exists before running
+          if [ -f "processed_data/data_train.csv" ] && [ -f "processed_data/data_validation.csv" ] && [ -f "processed_data/data_test.csv" ]; then
+            echo "Running MLflow project with data..."
+            mlflow run . --env-manager=conda
+          else
+            echo "Data files not found. Skipping MLflow run."
+            echo "Please ensure the following files exist in MLProject/processed_data/:"
+            echo "- data_train.csv"
+            echo "- data_validation.csv"
+            echo "- data_test.csv"
+            exit 1
+          fi
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_USER_TOKEN }}
 
       - name: List Generated Artifacts
+        if: success()
         run: |
           echo "Generated artifacts:"
           ls -la MLProject/
@@ -117,15 +210,18 @@ jobs:
           "
 
       - name: Setup Docker Buildx
+        if: success()
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
+        if: success()
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build Docker Image with MLflow
+        if: success()
         run: |
           cd MLProject
           sleep 30
@@ -229,6 +325,7 @@ jobs:
           "
 
       - name: Push Docker Image to Hub
+        if: success()
         run: |
           if docker images | grep -q "${{ secrets.DOCKER_REPO }}"; then
             echo "MLflow-built image found, pushing to Docker Hub..."
@@ -261,6 +358,7 @@ jobs:
           fi
 
       - name: Upload Artifacts to Repository
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mlflow-artifacts
@@ -273,7 +371,7 @@ jobs:
           retention-days: 30
 
       - name: Create Release with Artifacts
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: model-${{ github.run_number }}
@@ -317,11 +415,11 @@ jobs:
         run: |
           echo "CI/CD Pipeline Summary"
           echo "=================================="
-          echo "MLflow Project executed"
-          echo "Model trained and logged"
-          echo "Docker image built and pushed"
-          echo "Artifacts uploaded to GitHub"
-          echo "Release created (if on main branch)"
+          echo "MLflow Project status: ${{ job.status }}"
+          echo "Model trained and logged: ${{ steps.run-mlflow-project.outcome == 'success' }}"
+          echo "Docker image built and pushed: ${{ steps.push-docker-image-to-hub.outcome == 'success' }}"
+          echo "Artifacts uploaded to GitHub: ${{ steps.upload-artifacts-to-repository.outcome == 'success' }}"
+          echo "Release created: ${{ steps.create-release-with-artifacts.outcome == 'success' }}"
           echo ""
           echo "Links:"
           echo "- Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}"
