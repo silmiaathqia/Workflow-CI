@@ -1,6 +1,9 @@
+name: mlflow-env
+
 channels:
   - defaults
   - conda-forge
+
 dependencies:
   - python=3.12.7
   - pip<=25.1
@@ -11,9 +14,8 @@ dependencies:
   - matplotlib=3.10.3
   - seaborn=0.13.2
   - pip:
-    - mlflow==2.19.0
-    - cloudpickle==3.1.1
-    - psutil==7.0.0
-    - dagshub==0.5.10
-    - PyYAML==6.0.2
-name: mlflow-env
+      - mlflow==2.19.0
+      - cloudpickle==3.1.1
+      - psutil==7.0.0
+      - dagshub==0.5.10
+      - PyYAML==6.0.2
