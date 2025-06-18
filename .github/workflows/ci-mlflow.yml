@@ -41,8 +41,21 @@ jobs:
         with:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
-          channels: conda-forge
+          # Fix: Explicitly specify channels with defaults first, then conda-forge
+          channels: defaults,conda-forge
           channel-priority: flexible
+          # Fix: Remove defaults channel implicitly
+          conda-remove-defaults: false
+
+      - name: Configure Conda Channels
+        shell: bash -l {0}
+        run: |
+          echo "Configuring conda channels explicitly..."
+          conda config --add channels defaults
+          conda config --add channels conda-forge
+          conda config --set channel_priority flexible
+          echo "Current conda configuration:"
+          conda config --show channels
 
       - name: Create MLProject Structure
         run: |
@@ -78,9 +91,10 @@ jobs:
       - name: Create conda.yaml file
         run: |
           cd MLProject
-          echo "Creating conda.yaml"
+          echo "Creating conda.yaml with explicit channel configuration"
           cat > conda.yaml << 'EOF'
           channels:
+            - defaults
             - conda-forge
           dependencies:
             - python=3.12.7
@@ -142,7 +156,9 @@ jobs:
         run: |
           cd MLProject
           echo "Installing dependencies with conda environment..."
-          conda env create -f conda.yaml
+          
+          # Create environment with explicit channel configuration
+          CONDA_CHANNEL_PRIORITY=flexible conda env create -f conda.yaml --force
           conda activate mlflow-env
           
           echo "Verifying installation..."
