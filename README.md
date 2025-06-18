@@ -247,11 +247,3 @@ Project ini menggunakan MIT License. Lihat file [LICENSE](LICENSE) untuk detail.
 - **MLflow Documentation**: https://mlflow.org/docs/
 - **GitHub Actions**: https://docs.github.com/en/actions
 
-## Support
-
-Jika mengalami masalah atau memiliki pertanyaan:
-
-1. Check **Issues** section di GitHub repository
-2. Review **MLflow logs** di DagsHub
-3. Check **GitHub Actions logs** untuk CI/CD issues
-4. Create new issue dengan detail error dan environment info
