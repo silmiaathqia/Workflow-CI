@@ -1,10 +1,14 @@
-name: MLflow CI/CD with Docker Hub
+name: "MLflow CI/CD with Docker Hub"
 
 on:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
   pull_request:
-    branches: [main, master]
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 env:
@@ -13,7 +17,7 @@ env:
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
   DOCKER_REPO: ${{ secrets.DOCKER_REPO }}
-  PYTHON_VERSION: 3.12.7
+  PYTHON_VERSION: "3.12.7"
 
 jobs:
   mlflow-training:
@@ -208,7 +212,7 @@ jobs:
               
               EXPOSE 8080
               
-              CMD ["python", "modelling.py"]'''
+              CMD [\"python\", \"modelling.py\"]'''
               with open('Dockerfile', 'w') as f:
                   f.write(dockerfile_content)
                   
@@ -274,35 +278,22 @@ jobs:
         with:
           tag_name: model-${{ github.run_number }}
           name: Model Release ${{ github.run_number }}
-          body: >
+          body: |
             Automated Model Training Release
 
-
             Training Results:
-
-            - MLflow Project executed successfully
-
-            - Docker image built and pushed to Docker Hub
-
-            - All artifacts saved and available for download
-
+              - MLflow Project executed successfully
+              - Docker image built and pushed to Docker Hub
+              - All artifacts saved and available for download
 
             Docker Image:
-
-            docker pull ${{ secrets.DOCKER_REPO }}
-
-
+              docker pull ${{ secrets.DOCKER_REPO }}
+              
             Artifacts included:
-
-            - Model files (*.pkl)
-
-            - Training reports (*.txt)
-
-            - Configuration files (*.json, *.yaml)
-
-            - Visualizations (*.png)
-
-
+              - Model files (*.pkl)
+              - Training reports (*.txt)
+              - Configuration files (*.json, *.yaml)
+              - Visualizations (*.png)
             MLflow Tracking: ${{ secrets.MLFLOW_TRACKING_URI }}
           files: |
             MLProject/*.txt
