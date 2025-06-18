@@ -1,13 +1,13 @@
 # Worker Productivity MLflow CI/CD Pipeline
 
-[![MLflow CI/CD with Docker Hub](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow-docker.yml/badge.svg)](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow-docker.yml)
+[![MLflow CI/CD](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow.yml/badge.svg)](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow.yml)
 [![Python](https://img.shields.io/badge/python-3.12.7-blue.svg)](https://www.python.org/downloads/)
 [![MLflow](https://img.shields.io/badge/MLflow-2.19.0-orange.svg)](https://mlflow.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## 🎯 Overview
 
-Automated CI/CD pipeline for Worker Productivity Classification using **MLflow Project** with **Docker Hub** integration. This pipeline automatically trains, validates, and deploys a Neural Network model for predicting worker productivity levels (High, Medium, Low).
+Automated CI/CD pipeline for Worker Productivity Classification using **MLflow Project**. This pipeline automatically trains, validates, and deploys a Neural Network model for predicting worker productivity levels (High, Medium, Low).
 
 ### Key Features
 - ✅ **Automated ML Pipeline** with MLflow Project
@@ -22,7 +22,7 @@ Automated CI/CD pipeline for Worker Productivity Classification using **MLflow P
 Workflow-CI/
 ├── .github/
 │   └── workflows/
-│       └── ci-mlflow-docker.yml          # Main CI/CD workflow
+│       └── ci-mlflow.yml          # Main CI/CD workflow
 ├── MLProject/
 │   ├── modelling.py                      # Main training script
 │   ├── conda.yaml                        # Environment dependencies
@@ -46,7 +46,6 @@ Workflow-CI/
 ### Prerequisites
 - Python 3.12.7
 - MLflow 2.19.0
-- Docker (for containerization)
 - DagsHub account (for experiment tracking)
 
 ### Local Development
@@ -62,15 +61,6 @@ conda activate mlflow-env
 # Run training locally
 cd MLProject
 python modelling.py --data_path processed_data --experiment_name "Worker_Productivity_Local"
-```
-
-### Docker Usage
-```bash
-# Pull latest image
-docker pull your-dockerhub-username/worker-productivity-mlp
-
-# Run container
-docker run -p 8080:8080 your-dockerhub-username/worker-productivity-mlp
 ```
 
 ## 🔧 Model Architecture
@@ -89,8 +79,7 @@ docker run -p 8080:8080 your-dockerhub-username/worker-productivity-mlp
 2. **Environment Setup** - Create conda environment with dependencies
 3. **Model Training** - Train MLP model with MLflow tracking
 4. **Evaluation** - Generate metrics, confusion matrix, and reports
-5. **Deployment** - Push to Docker Hub
-6. **Release** - Create GitHub release with artifacts
+5. **Release** - Create GitHub release with artifacts
 
 ## 🎛️ Configuration
 
@@ -99,9 +88,6 @@ docker run -p 8080:8080 your-dockerhub-username/worker-productivity-mlp
 MLFLOW_TRACKING_URI     # DagsHub MLflow URI
 DAGSHUB_USERNAME        # DagsHub username
 DAGSHUB_USER_TOKEN      # DagsHub access token
-DOCKER_USERNAME         # Docker Hub username
-DOCKER_PASSWORD         # Docker Hub password/token
-DOCKER_REPO            # Docker repository name
 ```
 
 ### MLflow Project Parameters
@@ -168,4 +154,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Note**: This project demonstrates advanced MLOps practices with complete automation from training to deployment using MLflow Projects and Docker Hub integration.
+**Note**: This project demonstrates advanced MLOps practices with complete automation from training to deployment using MLflow Projects.
