@@ -1,10 +1,22 @@
 # Worker Productivity MLflow CI/CD Pipeline
 
 [![MLflow CI/CD with Docker Hub](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow-docker.yml/badge.svg)](https://github.com/silmiaathqia/Workflow-CI/actions/workflows/ci-mlflow-docker.yml)
+[![Python](https://img.shields.io/badge/python-3.12.7-blue.svg)](https://www.python.org/downloads/)
+[![MLflow](https://img.shields.io/badge/MLflow-2.19.0-orange.svg)](https://mlflow.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## 🎯 Overview
 
-Automated CI/CD pipeline for Worker Productivity Classification using MLflow Project with Docker Hub integration.
+Automated CI/CD pipeline for Worker Productivity Classification using **MLflow Project** with **Docker Hub** integration. This pipeline automatically trains, validates, and deploys a Neural Network model for predicting worker productivity levels (High, Medium, Low).
+
+### Key Features
+- ✅ **Automated ML Pipeline** with MLflow Project
+- 🐳 **Docker containerization** for deployment
+- 📊 **DagsHub integration** for experiment tracking
+- 🔄 **GitHub Actions CI/CD**
+- 📈 **Automated model versioning**
+- 🏷️ **Automated releases** with artifacts
 
 ## 🏗️ Project Structure
 
@@ -12,190 +24,166 @@ Automated CI/CD pipeline for Worker Productivity Classification using MLflow Pro
 Workflow-CI/
 ├── .github/
 │   └── workflows/
-│       └── ci-mlflow-docker.yml
+│       └── ci-mlflow-docker.yml          # Main CI/CD workflow
 ├── MLProject/
-│   ├── modelling.py
-│   ├── conda.yaml
-│   ├── MLProject
+│   ├── modelling.py                      # Main training script
+│   ├── conda.yaml                        # Environment dependencies
+│   ├── MLproject                         # MLflow project configuration
 │   └── processed_data/
-│       ├── data_train.csv
-│       ├── data_validation.csv
-│       ├── data_test.csv
-│       ├── label_encoder.pkl
-│       ├── feature_scaler.pkl
-│       ├── label_mapping.csv
-│       ├── feature_names.csv
-│       └── preprocessing_summary.json
+│       ├── data_train.csv               # Training dataset
+│       ├── data_validation.csv          # Validation dataset
+│       ├── data_test.csv                # Test dataset
+│       ├── label_encoder.pkl            # Label encoder
+│       ├── feature_scaler.pkl           # Feature scaler
+│       ├── label_mapping.csv            # Label mappings
+│       ├── feature_names.csv            # Feature names
+│       └── preprocessing_summary.json   # Preprocessing info
 ├── README.md
-└── requirements.txt
+├── requirements.txt                     # Python dependencies
+└── conda.yaml                          # Main conda environment
 ```
 
-## 🚀 Features
+## 🚀 Quick Start
 
-- ✅ **MLflow Project Integration**: Automated model training using MLflow Projects
-- ✅ **DagsHub Integration**: Experiment tracking and model versioning
-- ✅ **Docker Hub**: Automated Docker image building and pushing using `mlflow build-docker`
-- ✅ **GitHub Actions**: Complete CI/CD pipeline with artifact management
-- ✅ **Artifact Storage**: Automatic upload to GitHub Releases
-- ✅ **Manual Trigger**: Workflow can be triggered manually via GitHub Actions
+### Prerequisites
+- Python 3.12.7
+- MLflow 2.19.0
+- Docker (for containerization)
+- DagsHub account (for experiment tracking)
 
-## 🔧 Setup Instructions
-
-### 1. Repository Setup
-
-1. Create a new public repository on GitHub named `Workflow-CI`
-2. Clone the repository and add the project structure above
-3. Push the initial code to the main branch
-
-### 2. GitHub Secrets Configuration
-
-Add the following secrets in your GitHub repository settings (`Settings > Secrets and variables > Actions`):
-
+### Local Development
 ```bash
-# DagsHub/MLflow Configuration
-MLFLOW_TRACKING_URI=https://dagshub.com/YOUR_USERNAME/Worker-Productivity-MLflow.mlflow
-DAGSHUB_USERNAME=your_dagshub_username
-DAGSHUB_USER_TOKEN=your_dagshub_token
+# Clone repository
+git clone https://github.com/silmiaathqia/Workflow-CI.git
+cd Workflow-CI
 
-# Docker Hub Configuration
-DOCKER_USERNAME=your_dockerhub_username
-DOCKER_PASSWORD=your_dockerhub_password
-DOCKER_REPO=your_dockerhub_username/worker-productivity-mlp
+# Create conda environment
+conda env create -f conda.yaml
+conda activate mlflow-env
+
+# Run training locally
+cd MLProject
+python modelling.py --data_path processed_data --experiment_name "Worker_Productivity_Local"
 ```
 
-### 3. DagsHub Setup
-
-1. Create a DagsHub account and repository
-2. Generate a personal access token
-3. Configure the repository for MLflow tracking
-
-### 4. Docker Hub Setup
-
-1. Create a Docker Hub account
-2. Create a new repository (e.g., `worker-productivity-mlp`)
-3. Generate an access token for GitHub Actions
-
-## 🎯 Workflow Triggers
-
-The CI/CD pipeline runs on:
-
-- **Push** to `main` or `master` branches
-- **Pull Request** to `main` or `master` branches  
-- **Manual trigger** via GitHub Actions interface
-
-## 🔄 Pipeline Steps
-
-### 1. Environment Setup
-- Checkout repository
-- Setup Python 3.12.7
-- Setup Conda environment
-- Install MLflow and dependencies
-
-### 2. MLflow Training
-- Configure DagsHub authentication
-- Run MLflow project: `mlflow run . --env-manager=conda`
-- Log model, metrics, and artifacts
-
-### 3. Docker Image Creation
-- Setup Docker Buildx
-- Login to Docker Hub
-- Build Docker image using `mlflow models build-docker`
-- Push image to Docker Hub
-
-### 4. Artifact Management
-- Upload artifacts to GitHub Actions
-- Create GitHub Release (on main branch)
-- Include all model files, reports, and configurations
-
-## 🐳 Docker Usage
-
-After successful pipeline execution, the Docker image will be available:
-
+### Docker Usage
 ```bash
-# Pull the image
-docker pull YOUR_USERNAME/worker-productivity-mlp
+# Pull latest image
+docker pull your-dockerhub-username/worker-productivity-mlp
 
-# Run the container
-docker run -p 8080:8080 YOUR_USERNAME/worker-productivity-mlp
-
-# Or run with MLServer (if enabled)
-docker run -p 8080:8080 -p 8081:8081 YOUR_USERNAME/worker-productivity-mlp
+# Run container
+docker run -p 8080:8080 your-dockerhub-username/worker-productivity-mlp
 ```
 
-## 📊 MLflow Integration
+## 🔧 Model Architecture
 
-### Model Registry
-- Model name: `WorkerProductivityMLP_Basic`
-- Automatic versioning on each training run
-- Complete experiment tracking
+**Multi-Layer Perceptron (MLP) Classifier**
+- **Hidden Layers**: (128, 64, 32) neurons
+- **Activation**: ReLU
+- **Solver**: Adam optimizer
+- **Regularization**: L2 (α=0.001)
+- **Early Stopping**: Enabled
+- **Classes**: High, Medium, Low productivity
 
-### Artifacts Logged
-- ✅ Trained model with signature
-- ✅ Feature scaler (`scaler_basic.pkl`)
-- ✅ Training reports and summaries
-- ✅ Confusion matrix and metrics visualizations
-- ✅ Environment configuration (`conda.yaml`)
-- ✅ Deployment information
+## 📊 Pipeline Workflow
 
-## 🎯 Advanced Features (Level 4)
+1. **Data Validation** - Verify all required CSV files exist
+2. **Environment Setup** - Create conda environment with dependencies
+3. **Model Training** - Train MLP model with MLflow tracking
+4. **Evaluation** - Generate metrics, confusion matrix, and reports
+5. **Docker Build** - Create containerized application
+6. **Deployment** - Push to Docker Hub
+7. **Release** - Create GitHub release with artifacts
 
-This implementation achieves **Advanced (4 pts)** by including:
+## 🎛️ Configuration
 
-1. ✅ **MLflow Project structure** with proper `MLProject` file
-2. ✅ **Complete CI/CD workflow** with GitHub Actions
-3. ✅ **Artifact storage** in GitHub Releases
-4. ✅ **Docker Hub integration** using `mlflow build-docker` function
-5. ✅ **Automated Docker image building and pushing**
+### Required GitHub Secrets
+```
+MLFLOW_TRACKING_URI     # DagsHub MLflow URI
+DAGSHUB_USERNAME        # DagsHub username
+DAGSHUB_USER_TOKEN      # DagsHub access token
+DOCKER_USERNAME         # Docker Hub username
+DOCKER_PASSWORD         # Docker Hub password/token
+DOCKER_REPO            # Docker repository name
+```
 
-## 🔧 Troubleshooting
+### MLflow Project Parameters
+```yaml
+data_path: "processed_data"              # Path to training data
+experiment_name: "Worker_Productivity_Classification_Sklearn"
+```
+
+## 📈 Model Performance
+
+The pipeline automatically tracks:
+- **Accuracy**: Overall classification accuracy
+- **Precision/Recall/F1**: Per-class and weighted metrics
+- **Confusion Matrix**: Visual classification results
+- **Training Loss**: Model convergence monitoring
+
+## 🐳 Docker Deployment
+
+The pipeline creates a production-ready Docker image with:
+- Python 3.12.7 slim base
+- All ML dependencies pre-installed
+- Non-root user for security
+- Port 8080 exposed
+- Automatic model serving capability
+
+## 📋 Generated Artifacts
+
+Each pipeline run produces:
+- `*.pkl` - Trained models and scalers
+- `*.txt` - Classification reports and summaries
+- `*.json` - Configuration and deployment info
+- `*.png` - Visualization plots
+- `Dockerfile` - Container configuration
+
+## 🔗 Integration Links
+
+- **MLflow Tracking**: [DagsHub Project](https://dagshub.com/silmiaathqia/Worker-Productivity-MLflow)
+- **Docker Hub**: [Container Repository](https://hub.docker.com/r/your-username/worker-productivity-mlp)
+- **CI/CD Pipeline**: [GitHub Actions](https://github.com/silmiaathqia/Workflow-CI/actions)
+
+## 🛠️ Troubleshooting
 
 ### Common Issues
+1. **Data Files Missing**: Ensure all CSV files are in `processed_data/`
+2. **MLflow Connection**: Check DagsHub credentials in secrets
+3. **Docker Build Failed**: Verify Docker Hub credentials
+4. **Model Training Error**: Check data format and feature consistency
 
-1. **MLflow Authentication**
-   - Ensure DagsHub tokens are correctly set in secrets
-   - Check MLflow tracking URI format
+### Debug Commands
+```bash
+# Check repository structure
+find . -name "*.csv" -o -name "*.py" -o -name "*.yml"
 
-2. **Docker Build Failures**
-   - Pipeline includes fallback Docker build mechanism
-   - Check Docker Hub credentials and repository permissions
+# Validate MLflow connection
+python -c "import mlflow; print(mlflow.get_tracking_uri())"
 
-3. **Model Registration**
-   - Pipeline waits for model registration with retry logic
-   - Includes alternative approaches if primary method fails
+# Test Docker image locally
+docker build -t test-image .
+docker run --rm test-image python modelling.py --help
+```
 
-### Debug Steps
-
-1. Check GitHub Actions logs for detailed error messages
-2. Verify all secrets are properly configured
-3. Ensure DagsHub repository is accessible
-4. Check Docker Hub repository permissions
-
-## 📈 Performance Metrics
-
-The pipeline tracks comprehensive metrics:
-
-- **Model Performance**: Accuracy, Precision, Recall, F1-Score
-- **Training Metrics**: Loss, iterations, convergence status
-- **Per-class Metrics**: Individual class performance
-- **Confusion Matrix**: Detailed classification results
-
-## 🔗 Links
-
-- **Docker Hub**: https://hub.docker.com/r/silmiathqia/worker-productivity-mlp
-- **DagsHub**: https://dagshub.com/silmiaathqia/Worker-Productivity-MLflow
-- **MLflow UI**: Access via DagsHub MLflow interface
-
-## 🤝 Contributing
+## 📝 Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run the pipeline to ensure everything works
-5. Submit a pull request
+2. Create feature branch (`git checkout -b feature/improvement`)
+3. Commit changes (`git commit -am 'Add improvement'`)
+4. Push to branch (`git push origin feature/improvement`)
+5. Create Pull Request
 
 ## 📄 License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **MLflow** for experiment tracking and model management
+- **DagsHub** for collaborative ML platform
+- **scikit-learn** for machine learning algorithms
+- **GitHub Actions** for CI/CD automation
 
 ---
 
