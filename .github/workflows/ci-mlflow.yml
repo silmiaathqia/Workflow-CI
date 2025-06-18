@@ -1,4 +1,4 @@
-name: "MLflow CI/CD with Docker Hub"
+name: "MLflow CI/CD Pipeline"
 
 on:
   push:
@@ -15,9 +15,6 @@ env:
   MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
   DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_USER_TOKEN }}
   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-  DOCKER_REPO: ${{ secrets.DOCKER_REPO }}
   PYTHON_VERSION: "3.12.7"
 
 jobs:
@@ -44,7 +41,7 @@ jobs:
         with:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
-          channels: conda-forge,defaults
+          channels: conda-forge
           channel-priority: flexible
 
       - name: Create MLProject Structure
@@ -85,7 +82,6 @@ jobs:
           cat > conda.yaml << 'EOF'
           channels:
             - conda-forge
-            - defaults
           dependencies:
             - python=3.12.7
             - pip<=25.1
@@ -116,11 +112,9 @@ jobs:
               command: "python modelling.py"
             train:
               parameters:
-                data_path: { type: str, default: "processed_data" }
-                experiment_name: { type: str, default: "Worker_Productivity_Classification_Sklearn" }
+                data_path: {type: str, default: "processed_data"}
+                experiment_name: {type: str, default: "Worker_Productivity_Classification_Sklearn"}
               command: "python modelling.py --data_path {data_path} --experiment_name {experiment_name}"
-            build_docker:
-              command: "mlflow models build-docker -m models:/WorkerProductivityMLP_Basic/latest -n worker-productivity-mlp --enable-mlserver"
           EOF
 
       - name: Verify MLProject Setup
@@ -274,24 +268,24 @@ jobs:
           export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
           export DAGSHUB_USER_TOKEN="${{ secrets.DAGSHUB_USER_TOKEN }}"
           
-          # First try to run with direct Python execution to avoid MLflow project issues
-          echo "Attempting direct Python execution first..."
+          # Run training with direct Python execution
+          echo "Running training with Python..."
           python modelling.py --data_path "processed_data" --experiment_name "Worker_Productivity_Classification_Sklearn" --cleanup
           
-          echo "✓ Direct Python execution completed"
+          echo "✓ Training completed successfully"
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_USER_TOKEN }}
           DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_USER_TOKEN }}
 
-      - name: Fallback MLflow Project Run
+      - name: Run MLflow Project
         if: success()
         shell: bash -l {0}
         run: |
           cd MLProject
           conda activate mlflow-env
-          echo "Running MLflow project as fallback..."
+          echo "Running MLflow project..."
           
           # Set environment variables
           export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
@@ -385,79 +379,7 @@ jobs:
               print(f'✗ Error checking experiment: {e}')
           "
 
-      - name: Setup Docker Buildx
-        if: success()
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        if: success()
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build Docker Image
-        if: success()
-        run: |
-          cd MLProject
-          echo "Building Docker image..."
-
-          # Create Dockerfile for the application
-          cat > Dockerfile << 'EOF'
-          FROM python:3.12.7-slim
-
-          WORKDIR /app
-
-          # Install system dependencies
-          RUN apt-get update && apt-get install -y \
-              gcc \
-              g++ \
-              && rm -rf /var/lib/apt/lists/*
-
-          # Copy conda.yaml and install dependencies
-          COPY conda.yaml .
-          RUN pip install --no-cache-dir \
-              mlflow==2.19.0 \
-              cloudpickle==3.1.1 \
-              numpy==1.26.4 \
-              pandas==2.3.0 \
-              psutil==7.0.0 \
-              scikit-learn==1.5.2 \
-              scipy==1.15.3 \
-              matplotlib==3.10.3 \
-              seaborn==0.13.2 \
-              dagshub==0.5.10 \
-              PyYAML==6.0.2
-
-          # Copy application files
-          COPY . .
-
-          # Create non-root user
-          RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-          USER appuser
-
-          # Expose port
-          EXPOSE 8080
-
-          # Default command
-          CMD ["python", "modelling.py", "--data_path", "processed_data", "--experiment_name", "Worker_Productivity_Classification_Sklearn"]
-          EOF
-
-          # Build Docker image
-          echo "Building Docker image: ${{ secrets.DOCKER_REPO }}"
-          docker build -t ${{ secrets.DOCKER_REPO }} .
-          
-          echo "✓ Docker image built successfully"
-
-      - name: Push Docker Image to Hub
-        if: success()
-        run: |
-          echo "Pushing Docker image to Docker Hub..."
-          docker push ${{ secrets.DOCKER_REPO }}
-          echo "✓ Docker image pushed successfully"
-          echo "Image available at: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}"
-
-      - name: Upload Artifacts to Repository
+      - name: Upload Artifacts to GitHub
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -468,7 +390,6 @@ jobs:
             MLProject/*.pkl
             MLProject/*.yaml
             MLProject/*.png
-            MLProject/Dockerfile
           retention-days: 30
 
       - name: Create Release with Artifacts
@@ -482,24 +403,18 @@ jobs:
 
             ### Training Results:
             - ✅ MLflow Project executed successfully
-            - ✅ Docker image built and pushed to Docker Hub
+            - ✅ Model trained and logged to DagsHub
             - ✅ All artifacts saved and available for download
 
-            ### Docker Image:
-            ```bash
-            docker pull ${{ secrets.DOCKER_REPO }}
-            ```
-            
             ### Artifacts included:
             - 📁 Model files (*.pkl)
             - 📊 Training reports (*.txt)
             - ⚙️ Configuration files (*.json, *.yaml)
             - 📈 Visualizations (*.png)
-            - 🐳 Dockerfile
               
             ### Links:
             - **MLflow Tracking**: ${{ secrets.MLFLOW_TRACKING_URI }}
-            - **Docker Hub**: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}
+            - **DagsHub Repository**: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/Worker-Productivity-MLflow
             
             ### Model Information:
             - **Model Type**: Basic MLP Classifier (scikit-learn)
@@ -511,7 +426,6 @@ jobs:
             MLProject/*.json
             MLProject/*.pkl
             MLProject/*.yaml
-            MLProject/Dockerfile
           draft: false
           prerelease: false
         env:
@@ -521,7 +435,6 @@ jobs:
         if: always()
         run: |
           echo "Cleaning up temporary files..."
-          docker system prune -f || true
           echo "✓ Cleanup completed"
 
       - name: Summary
@@ -538,13 +451,11 @@ jobs:
           echo "  - MLProject setup: ✓"
           echo "  - Data validation: ${{ steps.validate-data-files.outcome == 'success' && '✓' || '⚠️' }}"
           echo "  - Model training: ${{ steps.run-mlflow-project-training.outcome == 'success' && '✓' || '⚠️' }}"
-          echo "  - Docker build: ${{ steps.build-docker-image.outcome == 'success' && '✓' || '⚠️' }}"
-          echo "  - Docker push: ${{ steps.push-docker-image-to-hub.outcome == 'success' && '✓' || '⚠️' }}"
           echo "  - Artifacts upload: ✓"
           echo "  - Release creation: ${{ steps.create-release-with-artifacts.outcome == 'success' && '✓' || '⚠️' }}"
           echo ""
           echo "Links:"
-          echo "  - Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}"
+          echo "  - DagsHub: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/Worker-Productivity-MLflow"
           echo "  - MLflow: ${{ secrets.MLFLOW_TRACKING_URI }}"
           echo "  - Repository: ${{ github.server_url }}/${{ github.repository }}"
           echo "========================================"
