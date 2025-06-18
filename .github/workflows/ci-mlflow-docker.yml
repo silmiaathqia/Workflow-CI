@@ -51,7 +51,7 @@ jobs:
         mlflow --version
         python -c "import mlflow; print('MLflow installed successfully')"
         
-    - name: Configure DagsHub Authentication
+    - name: Configure DagsHub Authentication  
       run: |
         export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
         export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}" 
@@ -189,8 +189,7 @@ jobs:
             print(f'Error during Docker build: {e}')
             # Create a simple Dockerfile as fallback
             print('Creating fallback Dockerfile...')
-            dockerfile_content = '''
-FROM python:3.12.7-slim
+            dockerfile_content = '''FROM python:3.12.7-slim
 
 WORKDIR /app
 
@@ -201,18 +200,15 @@ COPY . .
 
 EXPOSE 8080
 
-CMD [\"python\", \"modelling.py\"]
-'''
+CMD [\"python\", \"modelling.py\"]'''
             with open('Dockerfile', 'w') as f:
                 f.write(dockerfile_content)
                 
-            requirements_content = '''
-mlflow==2.19.0
+            requirements_content = '''mlflow==2.19.0
 scikit-learn==1.5.2
 pandas==2.3.0
 numpy==1.26.4
-dagshub==0.5.10
-'''
+dagshub==0.5.10'''
             with open('requirements.txt', 'w') as f:
                 f.write(requirements_content)
             
