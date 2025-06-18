@@ -1,7 +1,5 @@
 name: Worker-Productivity-MLflow
 
-python_env: conda.yaml
-
 entry_points:
   main:
     command: "python modelling.py"
