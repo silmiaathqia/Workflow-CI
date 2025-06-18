@@ -39,24 +39,13 @@ jobs:
           echo "Looking for processed_data:"
           find . -name "processed_data" -type d
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Cache Conda Environment
-        uses: actions/cache@v3
-        with:
-          path: ~/conda_pkgs_dir
-          key: ${{ runner.os }}-conda-${{ hashFiles('**/conda.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-conda-
+          channels: conda-forge,defaults
+          channel-priority: flexible
 
       - name: Create MLProject Structure
         run: |
@@ -96,19 +85,20 @@ jobs:
           cat > conda.yaml << 'EOF'
           channels:
             - conda-forge
+            - defaults
           dependencies:
             - python=3.12.7
             - pip<=25.1
+            - numpy=1.26.4
+            - pandas=2.3.0
+            - scikit-learn=1.5.2
+            - scipy=1.15.3
+            - matplotlib=3.10.3
+            - seaborn=0.13.2
             - pip:
               - mlflow==2.19.0
               - cloudpickle==3.1.1
-              - numpy==1.26.4
-              - pandas==2.3.0
               - psutil==7.0.0
-              - scikit-learn==1.5.2
-              - scipy==1.15.3
-              - matplotlib==3.10.3
-              - seaborn==0.13.2
               - dagshub==0.5.10
               - PyYAML==6.0.2
           name: mlflow-env
@@ -153,18 +143,27 @@ jobs:
             exit 1
           fi
 
-      - name: Install MLflow and Dependencies
+      - name: Install Dependencies with Conda
+        shell: bash -l {0}
         run: |
-          pip install mlflow dagshub PyYAML
-
-      - name: Verify MLflow Installation
-        run: |
-          mlflow --version
-          python -c "import mlflow; print('MLflow installed successfully')"
-          python -c "import dagshub; print('DagsHub installed successfully')"
+          cd MLProject
+          echo "Installing dependencies with conda environment..."
+          conda env create -f conda.yaml
+          conda activate mlflow-env
+          
+          echo "Verifying installation..."
+          python -c "import numpy; print('numpy version:', numpy.__version__)"
+          python -c "import pandas; print('pandas version:', pandas.__version__)"
+          python -c "import sklearn; print('scikit-learn version:', sklearn.__version__)"
+          python -c "import matplotlib; print('matplotlib version:', matplotlib.__version__)"
+          python -c "import seaborn; print('seaborn version:', seaborn.__version__)"
+          python -c "import mlflow; print('mlflow version:', mlflow.__version__)"
+          python -c "import dagshub; print('dagshub installed successfully')"
 
       - name: Configure DagsHub Authentication
+        shell: bash -l {0}
         run: |
+          conda activate mlflow-env
           export MLFLOW_TRACKING_URI="${{ secrets.MLFLOW_TRACKING_URI }}"
           export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}" 
           export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
@@ -203,8 +202,10 @@ jobs:
           fi
 
       - name: Test Python Script Compatibility
+        shell: bash -l {0}
         run: |
           cd MLProject
+          conda activate mlflow-env
           echo "Testing Python script compatibility..."
           python -c "
           import sys
@@ -258,8 +259,10 @@ jobs:
           "
 
       - name: Run MLflow Project Training
+        shell: bash -l {0}
         run: |
           cd MLProject
+          conda activate mlflow-env
           echo "Running MLflow project training..."
           echo "Current directory: $(pwd)"
           echo "Files in directory:"
@@ -284,8 +287,10 @@ jobs:
 
       - name: Fallback MLflow Project Run
         if: success()
+        shell: bash -l {0}
         run: |
           cd MLProject
+          conda activate mlflow-env
           echo "Running MLflow project as fallback..."
           
           # Set environment variables
@@ -330,9 +335,12 @@ jobs:
 
       - name: Verify MLflow Experiment
         if: success()
+        shell: bash -l {0}
         run: |
+          cd MLProject
+          conda activate mlflow-env
           echo "Checking MLflow experiment..."
-          cd MLProject && python -c "
+          python -c "
           import mlflow
           import os
           
