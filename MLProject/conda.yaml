@@ -1,5 +1,9 @@
+name: mlflow-env
+
 channels:
   - conda-forge
+  - defaults
+
 dependencies:
   - python=3.12.7
   - pip<=25.1
@@ -15,4 +19,3 @@ dependencies:
     - psutil==7.0.0
     - dagshub==0.5.10
     - PyYAML==6.0.2
-name: mlflow-env
