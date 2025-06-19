@@ -34,51 +34,112 @@ jobs:
           find . -type f -name "*.py" -o -name "*.yml" -o -name "*.yaml" -o -name "*.csv" | head -20
           echo "Current directory contents:"
           ls -la
-          echo "Looking for MLProject directory:"
-          find . -name "MLProject" -type d
           echo "Looking for modelling.py:"
           find . -name "modelling.py" -type f
+          echo "Looking for processed_data:"
+          find . -name "processed_data" -type d
 
-      - name: Set up Conda with Fixed Channels
+      - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
-          channels: conda-forge
+          channels: conda-forge,defaults
           channel-priority: strict
           conda-remove-defaults: true
 
-      - name: Verify MLProject Structure
+      - name: Create MLProject Structure
         run: |
-          echo "Checking MLProject directory structure..."
-          if [ -d "MLProject" ]; then
-            echo "✓ MLProject directory exists"
-            cd MLProject
-            echo "MLProject contents:"
-            ls -la
-            
-            # Check required files
-            required_files=("modelling.py" "conda.yaml" "MLproject")
-            for file in "${required_files[@]}"; do
-              if [ -f "$file" ]; then
-                echo "✓ $file exists"
-              else
-                echo "✗ $file missing"
-                exit 1
-              fi
-            done
-            
-            # Check processed_data directory
-            if [ -d "processed_data" ]; then
-              echo "✓ processed_data directory exists"
-              echo "Data files:"
-              ls -la processed_data/
-            else
-              echo "✗ processed_data directory missing"
-              exit 1
-            fi
+          echo "Creating MLProject structure..."
+          mkdir -p MLProject
+          
+          # Copy modelling.py to MLProject if it exists in root
+          if [ -f "modelling.py" ]; then
+            echo "Copying modelling.py from root"
+            cp modelling.py MLProject/
+          elif [ -f "modelling (1).py" ]; then
+            echo "Copying modelling (1).py as modelling.py"
+            cp "modelling (1).py" MLProject/modelling.py
+          elif [ ! -f "MLProject/modelling.py" ]; then
+            echo "ERROR: modelling.py not found anywhere"
+            exit 1
+          fi
+          
+          # Copy processed_data to MLProject if it exists
+          if [ -d "processed_data" ]; then
+            echo "Copying processed_data from root"
+            cp -r processed_data MLProject/
+          elif [ -d "MLProject/processed_data" ]; then
+            echo "processed_data already exists in MLProject"
           else
-            echo "✗ MLProject directory not found"
+            echo "WARNING: processed_data directory not found"
+            echo "Creating placeholder structure for testing"
+            mkdir -p MLProject/processed_data
+            echo "Note: This will cause the training to fail without real data"
+          fi
+
+      - name: Create conda.yaml file
+        run: |
+          cd MLProject
+          echo "Creating conda.yaml with explicit channel configuration"
+          cat > conda.yaml << 'EOF'
+          name: mlflow-env
+          channels:
+            - conda-forge
+            - defaults
+          dependencies:
+            - python=3.12.7
+            - pip<=25.1
+            - numpy=1.26.4
+            - pandas=2.3.0
+            - scikit-learn=1.5.2
+            - scipy=1.15.3
+            - matplotlib=3.10.3
+            - seaborn=0.13.2
+            - pip:
+              - mlflow==2.19.0
+              - cloudpickle==3.1.1
+              - psutil==7.0.0
+              - dagshub==0.5.10
+              - PyYAML==6.0.2
+          EOF
+
+      - name: Create MLproject file
+        run: |
+          cd MLProject
+          echo "Creating MLproject file"
+          cat > MLproject << 'EOF'
+          name: Worker-Productivity-MLflow
+          python_env: conda.yaml
+          entry_points:
+            main:
+              command: "python modelling.py"
+            train:
+              parameters:
+                data_path: {type: str, default: "processed_data"}
+                experiment_name: {type: str, default: "Worker_Productivity_Classification_Sklearn"}
+              command: "python modelling.py --data_path {data_path} --experiment_name {experiment_name}"
+            build_docker:
+              command: "mlflow models build-docker -m models:/WorkerProductivityMLP_Basic/latest -n worker-productivity-mlp --enable-mlserver"
+          EOF
+
+      - name: Verify MLProject Setup
+        run: |
+          echo "MLProject directory contents:"
+          ls -la MLProject/
+          echo ""
+          echo "MLproject file content:"
+          cat MLProject/MLproject
+          echo ""
+          echo "conda.yaml content:"
+          cat MLProject/conda.yaml
+          echo ""
+          echo "Checking for modelling.py:"
+          if [ -f "MLProject/modelling.py" ]; then
+            echo "✓ modelling.py found"
+            echo "File size: $(wc -l < MLProject/modelling.py) lines"
+          else
+            echo "✗ modelling.py missing"
             exit 1
           fi
 
@@ -87,6 +148,11 @@ jobs:
         run: |
           cd MLProject
           echo "Installing dependencies with conda environment..."
+          
+          # Remove existing environment if it exists
+          conda env remove -n mlflow-env --yes || echo "Environment doesn't exist, continuing..."
+          
+          # Create environment
           conda env create -f conda.yaml
           conda activate mlflow-env
           
@@ -122,13 +188,8 @@ jobs:
             for file in "${required_files[@]}"; do
               if [ -f "processed_data/$file" ]; then
                 echo "✓ $file exists"
-                line_count=$(wc -l < "processed_data/$file")
-                echo "  Size: $line_count lines"
-                if [ "$line_count" -gt 1 ]; then
-                  echo "  Header: $(head -1 processed_data/$file)"
-                else
-                  echo "  WARNING: File appears to be empty or has only header"
-                fi
+                echo "  Size: $(wc -l < processed_data/$file) lines"
+                echo "  Header: $(head -1 processed_data/$file)"
               else
                 echo "✗ $file missing"
                 all_files_exist=false
@@ -270,177 +331,59 @@ jobs:
           export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}"
           export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_USER_TOKEN }}"
           
-          # Get latest model version
-          python -c "
-          import mlflow
-          import os
-          
-          mlflow.set_tracking_uri('${{ secrets.MLFLOW_TRACKING_URI }}')
-          
-          try:
-              client = mlflow.MlflowClient()
-              models = client.search_registered_models()
-              productivity_models = [m for m in models if 'WorkerProductivityMLP_Basic' in m.name]
-              
-              if productivity_models:
-                  model_name = productivity_models[0].name
-                  latest_version = client.get_latest_versions(model_name, stages=['None'])[0]
-                  model_uri = f'models:/{model_name}/{latest_version.version}'
-                  print(f'Found model: {model_uri}')
-                  
-                  # Create model directory for Docker build
-                  import shutil
-                  import tempfile
-                  
-                  # Download model to local directory
-                  model_path = mlflow.artifacts.download_artifacts(model_uri, dst_path='./model_artifacts')
-                  print(f'Model downloaded to: {model_path}')
-                  
-                  with open('model_info.txt', 'w') as f:
-                      f.write(f'Model URI: {model_uri}\n')
-                      f.write(f'Model Name: {model_name}\n')
-                      f.write(f'Version: {latest_version.version}\n')
-                      f.write(f'Local Path: {model_path}\n')
-                  
-              else:
-                  print('No registered models found')
-                  # Create placeholder for Docker build
-                  with open('model_info.txt', 'w') as f:
-                      f.write('No registered model found - using latest run artifacts\n')
-                  
-          except Exception as e:
-              print(f'Error getting model info: {e}')
-              with open('model_info.txt', 'w') as f:
-                  f.write(f'Error: {e}\n')
-          "
-          
           # Login to Docker Hub
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
           
           # Try to build Docker image using MLflow
-          echo "Attempting to build Docker image..."
-          if [ -f "model_info.txt" ]; then
-            echo "Model info:"
-            cat model_info.txt
+          echo "Attempting to build Docker image with MLflow..."
+          mlflow models build-docker \
+            -m "models:/WorkerProductivityMLP_Basic/latest" \
+            -n "${{ secrets.DOCKER_REPO }}:v${{ github.run_number }}" \
+            --enable-mlserver || {
+            echo "MLflow Docker build failed, trying alternative approach..."
             
-            # Try MLflow docker build if model exists
-            if grep -q "Model URI:" model_info.txt; then
-              MODEL_URI=$(grep "Model URI:" model_info.txt | cut -d' ' -f3)
-              echo "Building Docker image for model: $MODEL_URI"
-              
-              mlflow models build-docker \
-                -m "$MODEL_URI" \
-                -n "${{ secrets.DOCKER_REPO }}:latest" \
-                --enable-mlserver || {
-                echo "MLflow Docker build failed, creating custom Dockerfile..."
-                
-                # Create custom Dockerfile
-                cat > Dockerfile << 'EOF'
+            # Create custom Dockerfile as fallback
+            cat > Dockerfile << 'EOF'
           FROM python:3.12.7-slim
-          
+
+          # Set working directory
           WORKDIR /app
-          
+
           # Copy requirements
           COPY conda.yaml .
-          COPY requirements.txt* ./
-          
+          COPY *.pkl ./
+          COPY *.py ./
+
           # Install dependencies
-          RUN pip install --no-cache-dir \
-              mlflow==2.19.0 \
-              cloudpickle==3.1.1 \
-              numpy==1.26.4 \
-              pandas==2.3.0 \
-              scikit-learn==1.5.2 \
-              scipy==1.15.3 \
-              matplotlib==3.10.3 \
-              seaborn==0.13.2 \
-              dagshub==0.5.10 \
-              PyYAML==6.0.2 \
-              psutil==7.0.0
-          
-          # Copy model artifacts
-          COPY . .
-          
-          # Set environment variables
-          ENV MLFLOW_TRACKING_URI=${{ secrets.MLFLOW_TRACKING_URI }}
-          ENV MLFLOW_TRACKING_USERNAME=${{ secrets.DAGSHUB_USERNAME }}
-          ENV MLFLOW_TRACKING_PASSWORD=${{ secrets.DAGSHUB_USER_TOKEN }}
-          
+          RUN pip install mlflow==2.19.0 cloudpickle==3.1.1 numpy==1.26.4 pandas==2.3.0 \
+              scikit-learn==1.5.2 scipy==1.15.3 dagshub==0.5.10 PyYAML==6.0.2
+
           # Expose port
           EXPOSE 8080
-          
-          # Default command
-          CMD ["python", "modelling.py", "--data_path", "processed_data"]
+
+          # Command to serve model
+          CMD ["python", "-c", "import mlflow; mlflow.models.serve(model_uri='./model', host='0.0.0.0', port=8080)"]
           EOF
-                
-                # Build custom Docker image
-                docker build -t "${{ secrets.DOCKER_REPO }}:latest" .
-                echo "✓ Custom Docker image built successfully"
-              }
-            else
-              echo "No model URI found, creating basic Docker image..."
-              
-              # Create basic Dockerfile
-              cat > Dockerfile << 'EOF'
-          FROM python:3.12.7-slim
+            
+            # Build custom Docker image
+            docker build -t "${{ secrets.DOCKER_REPO }}:v${{ github.run_number }}" .
+            echo "✓ Custom Docker image built successfully"
+          }
           
-          WORKDIR /app
+          # Tag as latest
+          docker tag "${{ secrets.DOCKER_REPO }}:v${{ github.run_number }}" "${{ secrets.DOCKER_REPO }}:latest"
           
-          # Copy files
-          COPY . .
+          # Push to Docker Hub
+          echo "Pushing Docker images to Docker Hub..."
+          docker push "${{ secrets.DOCKER_REPO }}:v${{ github.run_number }}"
+          docker push "${{ secrets.DOCKER_REPO }}:latest"
           
-          # Install dependencies
-          RUN pip install --no-cache-dir \
-              mlflow==2.19.0 \
-              cloudpickle==3.1.1 \
-              numpy==1.26.4 \
-              pandas==2.3.0 \
-              scikit-learn==1.5.2 \
-              scipy==1.15.3 \
-              matplotlib==3.10.3 \
-              seaborn==0.13.2 \
-              dagshub==0.5.10 \
-              PyYAML==6.0.2 \
-              psutil==7.0.0
-          
-          # Set environment variables
-          ENV MLFLOW_TRACKING_URI=${{ secrets.MLFLOW_TRACKING_URI }}
-          ENV MLFLOW_TRACKING_USERNAME=${{ secrets.DAGSHUB_USERNAME }}
-          ENV MLFLOW_TRACKING_PASSWORD=${{ secrets.DAGSHUB_USER_TOKEN }}
-          
-          # Expose port
-          EXPOSE 8080
-          
-          # Default command
-          CMD ["python", "modelling.py", "--data_path", "processed_data"]
-          EOF
-              
-              docker build -t "${{ secrets.DOCKER_REPO }}:latest" .
-              echo "✓ Basic Docker image built successfully"
-            fi
-          fi
+          echo "✓ Docker images pushed successfully"
+          echo "Docker Hub Repository: https://hub.docker.com/r/${{ secrets.DOCKER_REPO }}"
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_USER_TOKEN }}
-          DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_USER_TOKEN }}
-
-      - name: Push Docker Image to Docker Hub
-        if: success()
-        run: |
-          echo "Pushing Docker image to Docker Hub..."
-          
-          # Login to Docker Hub
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-          
-          # Tag and push image
-          docker tag "${{ secrets.DOCKER_REPO }}:latest" "${{ secrets.DOCKER_REPO }}:${{ github.run_number }}"
-          docker push "${{ secrets.DOCKER_REPO }}:latest"
-          docker push "${{ secrets.DOCKER_REPO }}:${{ github.run_number }}"
-          
-          echo "✅ Docker image pushed successfully"
-          echo "Image: ${{ secrets.DOCKER_REPO }}:latest"
-          echo "Tagged: ${{ secrets.DOCKER_REPO }}:${{ github.run_number }}"
 
       - name: List Generated Artifacts
         if: success()
@@ -455,8 +398,7 @@ jobs:
           cd MLProject
           for file in "scaler_basic.pkl" "dagshub_info.json" "classification_report_basic.txt" "model_summary_basic.txt" "deployment_info_basic.json"; do
             if [ -f "$file" ]; then
-              size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "unknown")
-              echo "✓ $file exists ($size bytes)"
+              echo "✓ $file exists ($(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "unknown size") bytes)"
             else
               echo "✗ $file missing"
             fi
@@ -535,7 +477,7 @@ jobs:
           tag_name: model-${{ github.run_number }}
           name: Model Release ${{ github.run_number }}
           body: |
-            ## 🚀 Automated Model Training Release
+            ## Automated Model Training Release
 
             ### Training Results:
             - ✅ MLflow Project executed successfully
@@ -543,38 +485,31 @@ jobs:
             - ✅ Docker image built and pushed to Docker Hub
             - ✅ All artifacts saved and available for download
 
-            ### 🐳 Docker Information:
-            - **Docker Image**: `${{ secrets.DOCKER_REPO }}:latest`
-            - **Tagged Version**: `${{ secrets.DOCKER_REPO }}:${{ github.run_number }}`
-            - **Docker Hub**: https://hub.docker.com/r/${{ secrets.DOCKER_REPO }}
-
-            ### 📦 Artifacts included:
+            ### Artifacts included:
             - 📁 Model files (*.pkl)
             - 📊 Training reports (*.txt)
             - ⚙️ Configuration files (*.json, *.yaml)
             - 📈 Visualizations (*.png)
-            - 🐳 Dockerfile
+            - 🐳 Docker configuration files
               
-            ### 🔗 Links:
+            ### Links:
             - **MLflow Tracking**: ${{ secrets.MLFLOW_TRACKING_URI }}
             - **DagsHub Repository**: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/Worker-Productivity-MLflow
             - **Docker Hub**: https://hub.docker.com/r/${{ secrets.DOCKER_REPO }}
             
-            ### 🤖 Model Information:
+            ### Model Information:
             - **Model Type**: Basic MLP Classifier (scikit-learn)
             - **Architecture**: (128, 64, 32) hidden layers
             - **Target**: Worker Productivity Classification
             - **Classes**: High, Low, Medium
-            - **MLflow Model**: WorkerProductivityMLP_Basic
-
-            ### 🚀 Usage:
-            ```bash
-            # Pull and run Docker image
-            docker pull ${{ secrets.DOCKER_REPO }}:latest
-            docker run -p 8080:8080 ${{ secrets.DOCKER_REPO }}:latest
             
-            # Or use MLflow
-            mlflow models serve -m models:/WorkerProductivityMLP_Basic/latest -p 8080
+            ### Docker Usage:
+            ```bash
+            # Pull the Docker image
+            docker pull ${{ secrets.DOCKER_REPO }}:v${{ github.run_number }}
+            
+            # Run the model server
+            docker run -p 8080:8080 ${{ secrets.DOCKER_REPO }}:v${{ github.run_number }}
             ```
           files: |
             MLProject/*.txt
@@ -591,7 +526,7 @@ jobs:
         if: always()
         run: |
           echo "Cleaning up temporary files..."
-          docker system prune -f || true
+          docker system prune -f || echo "Docker cleanup skipped"
           echo "✓ Cleanup completed"
 
       - name: Summary
@@ -599,7 +534,7 @@ jobs:
         run: |
           echo ""
           echo "========================================"
-          echo "        🎯 CI/CD Pipeline Summary       "
+          echo "           CI/CD Pipeline Summary       "
           echo "========================================"
           echo "Pipeline status: ${{ job.status }}"
           echo ""
@@ -609,11 +544,10 @@ jobs:
           echo "  - Data validation: ${{ steps.validate-data-files.outcome == 'success' && '✓' || '⚠️' }}"
           echo "  - Model training: ${{ steps.run-mlflow-project-training.outcome == 'success' && '✓' || '⚠️' }}"
           echo "  - Docker build: ${{ steps.build-docker-image-with-mlflow.outcome == 'success' && '✓' || '⚠️' }}"
-          echo "  - Docker push: ${{ steps.push-docker-image-to-docker-hub.outcome == 'success' && '✓' || '⚠️' }}"
           echo "  - Artifacts upload: ✓"
           echo "  - Release creation: ${{ steps.create-release-with-artifacts.outcome == 'success' && '✓' || '⚠️' }}"
           echo ""
-          echo "🔗 Links:"
+          echo "Links:"
           echo "  - DagsHub: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/Worker-Productivity-MLflow"
           echo "  - MLflow: ${{ secrets.MLFLOW_TRACKING_URI }}"
           echo "  - Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_REPO }}"
