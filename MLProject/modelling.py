@@ -390,7 +390,7 @@ def train_basic_model(data_path="processed_data", experiment_name="Worker_Produc
         print(f"Check MLflow UI at: {mlflow.get_tracking_uri()}")
         print("DagsHub integration active for online sync")
         
-        # Return metrics for summary
+         # Return metrics for summary
         metrics = {
             'test_accuracy': accuracy,
             'test_precision_weighted': precision,
@@ -399,7 +399,20 @@ def train_basic_model(data_path="processed_data", experiment_name="Worker_Produc
             'n_iterations': model.n_iter_,
             'convergence_achieved': model.n_iter_ < model.max_iter
         }
-        
+		
+		# Simpan model lokal untuk inference/exporter
+		with open('model_basic.pkl', 'wb') as f:
+			pickle.dump(model, f)
+		print("✓ Model saved locally as model_basic.pkl")
+
+		# Registrasi model ke MLflow Registry (agar bisa serve via models:/...)
+		mlflow.sklearn.log_model(
+			sk_model=model,
+			artifact_path="model",
+			registered_model_name="WorkerProductivityMLP_Basic"
+		)
+		print("✓ Model registered to MLflow Registry as 'WorkerProductivityMLP_Basic'")
+
         return model, scaler, metrics
 
 def make_prediction(model, scaler, sample_data):
