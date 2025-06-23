@@ -354,7 +354,7 @@ def train_basic_model(data_path="processed_data", experiment_name="Worker_Produc
             "framework": "sklearn",
             "version": "1.0",
             "dataset": "worker_productivity",
-            "author": "kriteria_2",
+            "author": "silmiathqia",
             "experiment_group": "baseline",
             "logging_type": "autolog_focused"
         })
