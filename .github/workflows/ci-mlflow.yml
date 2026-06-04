@@ -149,7 +149,7 @@ jobs:
           export DAGSHUB_USER_TOKEN="${{ secrets.DAGSHUB_USER_TOKEN }}"
 
           mlflow run . \
-            --env-manager=local \
+            --env-manager=conda \
             --experiment-name="Worker_Productivity_Classification_Sklearn" \
             -P data_path="processed_data" \
             -P experiment_name="Worker_Productivity_Classification_Sklearn"
